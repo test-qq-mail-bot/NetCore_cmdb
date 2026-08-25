@@ -1,0 +1,4 @@
+# cmdb 插件运行依赖（NetCore Framework 插件）
+# 部署：将本仓库 cmdb/ 目录整体放入框架 plugins/ 下（即 plugins/cmdb/），框架自动识别
+# 主框架 requirements.txt 已包含全部插件依赖；本文件供本插件单独开发/测试使用
+fastapi==0.141.1
