@@ -1,0 +1,32 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*$py.class
+*.egg-info/
+.eggs/
+build/
+.venv/
+venv/
+env/
+
+# ===== 运行时（不进仓库）=====
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# ===== 密钥 / 证书 =====
+*.key
+*.crt
+*.pem
+
+# ===== 编辑器 / OS =====
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
