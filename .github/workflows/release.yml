@@ -18,12 +18,12 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          VERSION=$(sed -n 's/.*"version"\s*:\s*"\([^"]*\)".*/\1/p' cmdb/plugin.py | head -n 1)
+          VERSION=$(sed -n 's/.*"version"\s*:\s*"\([^"]*\)".*/\1/p' plugin.py | head -n 1)
           if [ -z "$VERSION" ]; then
-            echo "::error::无法从 cmdb/plugin.py 中解析版本号"
+            echo "::error::无法从 plugin.py 中解析版本号"
             exit 1
           fi
-          echo "从 cmdb/plugin.py 解析到版本号: $VERSION"
+          echo "从 plugin.py 解析到版本号: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check existing release
@@ -42,8 +42,11 @@ jobs:
       - name: Package plugin
         if: steps.check.outputs.skip == 'false'
         run: |
-          zip -r "cmdb-${{ steps.version.outputs.version }}.zip" cmdb \
-            -x "cmdb/data/*" "cmdb/__pycache__/*"
+          mkdir -p staging/NetCore_cmdb
+          cp -r __init__.py plugin.py common.py db.py config.yaml requirements.txt \
+            frontend modules wiki LICENSE README.md staging/NetCore_cmdb/
+          cd staging
+          zip -r "../cmdb-${{ steps.version.outputs.version }}.zip" NetCore_cmdb
 
       - name: Create Release
         if: steps.check.outputs.skip == 'false'
