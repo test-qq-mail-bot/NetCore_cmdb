@@ -28,13 +28,14 @@ NetCore Framework 的资产配置管理（CMDB）插件：IT 资产 / 物理资�
 
 | 路径 | 说明 |
 | --- | --- |
-| `cmdb/plugin.py` | 插件入口（继承 `core.plugins.base_plugin.BasePlugin`），集中定义 `/api/cmdb` 路由与菜单 |
-| `cmdb/config.yaml` | 插件默认配置 |
-| `cmdb/db.py` | SQLite 连接与数据访问 |
-| `cmdb/common.py` | 公共工具（建库、种子数据、HTML 转义等） |
-| `cmdb/modules/` | 业务模块：assets / racks / ports / dashboard / maintenance / reports / backup / import_csv |
-| `cmdb/frontend/` | 前端页面脚本（仪表盘 / IT 资产 / 办公资产 / 维保 / 报表 / 二维码库） |
-| `cmdb/data/` | 运行时数据（SQLite `cmdb.db`，由框架生成，**不进仓库**） |
+| `plugin.py` | 插件入口（继承 BasePlugin），集中定义 `/api/cmdb` 路由与菜单；`get_metadata()` 的 version 是全插件版本号的唯一来源 |
+| `db.py` | SQLite 连接与数据访问（兼容再导出层） |
+| `common.py` | 公共工具（建库、种子数据、`data/config.yaml` 自动生成等） |
+| `modules/` | 业务模块：assets / racks / ports / dashboard / maintenance / reports / backup / import_csv |
+| `frontend/` | 前端页面脚本（仪表盘 / IT 资产 / 办公资产 / 维保 / 报表 / 二维码库） |
+| `data/` | 运行时数据（SQLite `cmdb.db` 与自动生成的 `config.yaml`，**不进仓库**） |
+
+> 说明：插件配置 `config.yaml` 由插件首次加载时自动生成到 `data/` 目录（版本号取自 plugin.py），源码仓库不再维护静态配置文件。
 
 ## 文档
 

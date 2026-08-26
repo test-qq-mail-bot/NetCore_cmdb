@@ -57,7 +57,7 @@ class CMDBPlugin(BasePlugin):
             "name": "cmdb",
             # IT 资产详情-系统信息取消「密码」模块（移除显示密码按钮与密码列，
             # 密码已加密存储且不再展示，防敏感信息泄漏）
-            "version": "20260826-V3",
+            "version": "20260826-V4",
             "description": "资产配置管理（CMDB）：资产台账、机柜 U 位、维保与报表",
             "author": "NetCore Team",
         }
@@ -66,6 +66,8 @@ class CMDBPlugin(BasePlugin):
         first_run = common.init_db()
         if first_run:
             common.seed_if_empty(force=True)
+        # 自动生成/同步运行时配置 data/config.yaml（版本号以本文件 get_metadata 为唯一来源）
+        common.ensure_config(self.get_metadata().get("version", ""))
         logger.info("CMDB 插件加载完成")
         return True
 

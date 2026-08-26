@@ -15,6 +15,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Syntax check (python)
+        run: python3 -m py_compile plugin.py common.py db.py modules/*.py
+
       - name: Extract version
         id: version
         run: |
@@ -43,7 +46,7 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         run: |
           mkdir -p staging/NetCore_cmdb
-          cp -r __init__.py plugin.py common.py db.py config.yaml requirements.txt \
+          cp -r __init__.py plugin.py common.py db.py requirements.txt \
             frontend modules wiki LICENSE README.md staging/NetCore_cmdb/
           cd staging
           zip -r "../cmdb-${{ steps.version.outputs.version }}.zip" NetCore_cmdb

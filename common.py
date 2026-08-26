@@ -17,10 +17,18 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 from core.config_loader import PLUGINS_DIR
+from core.logger import get_logger
 from core.timeutil import utc_now_str
 
+logger = get_logger()
+
 DB_PATH = PLUGINS_DIR / "NetCore_cmdb" / "data" / "cmdb.db"
+
+# 运行时自动生成的插件配置文件（data/ 目录已被 .gitignore 排除，不进源码仓库）
+CONFIG_PATH = PLUGINS_DIR / "NetCore_cmdb" / "data" / "config.yaml"
 
 # 资产分类前缀（用于生成资产编号）
 CATEGORY_PREFIX = {
@@ -419,6 +427,41 @@ def seed_if_empty(force: bool = False):
         return True
     finally:
         conn.close()
+
+
+def ensure_config(version: str = "") -> bool:
+    """自动生成并维护 data/config.yaml（运行时文件，不随源码仓库分发）。
+
+    - 版本号唯一来源是 plugin.py 的 get_metadata()，避免双处维护；
+    - 文件不存在：写入默认内容；
+    - 已存在但 version 字段与传入值不一致（或文件损坏）：整体重写以同步；
+    - 版本一致则不触碰文件。
+    返回 True 表示本次写入或更新了文件。任何异常仅告警、不阻断插件加载。
+    """
+    try:
+        current = None
+        if CONFIG_PATH.exists():
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    current = yaml.safe_load(f) or {}
+            except Exception:  # noqa: BLE001
+                current = None  # 文件损坏视为缺失，走重建
+        if isinstance(current, dict) and current.get("version") == version:
+            return False
+        payload = {
+            "plugin": "cmdb",
+            "version": version,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "note": "本文件由 CMDB 插件启动时自动生成，请勿手工编辑",
+        }
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
+        logger.info("config.yaml %s：%s", "已更新" if current is not None else "已自动生成", CONFIG_PATH)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("config.yaml 自动生成失败（不影响插件运行）：%s", exc)
+        return False
 
 
 def restore_demo_data() -> dict:
