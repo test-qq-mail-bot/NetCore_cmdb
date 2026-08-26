@@ -48,6 +48,8 @@ jobs:
           mkdir -p staging/NetCore_cmdb
           cp -r __init__.py plugin.py common.py db.py requirements.txt \
             frontend modules wiki LICENSE README.md staging/NetCore_cmdb/
+          find staging -name "__pycache__" -type d -prune -exec rm -rf {} +
+          find staging -name "*.pyc" -delete
           cd staging
           zip -r "../cmdb-${{ steps.version.outputs.version }}.zip" NetCore_cmdb
 
