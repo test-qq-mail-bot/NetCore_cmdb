@@ -7,8 +7,8 @@ import_all   从备份 JSON 还原（merge / overwrite 两种模式）
 import json
 from typing import Dict, List, Optional
 
-from plugins.cmdb import common
-from plugins.cmdb.modules import ports as _ports
+from plugins.NetCore_cmdb import common
+from plugins.NetCore_cmdb.modules import ports as _ports
 
 BACKUP_VERSION = "20260804-V4"
 

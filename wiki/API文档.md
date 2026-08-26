@@ -12,7 +12,7 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/cmdb/assets` | 分页列表。参数：`page, size(≤10000), search, category, exclude_category, sort_by, sort_order, filter_col, filter_values`（多选） |
+| GET | `/api/cmdb/assets` | 分页列表。参数：`page, size(≤200，超过返回 422), search, category, exclude_category, sort_by, sort_order, filter_col, filter_values`（多选）。需要全量数据时请按 `total` 循环翻页取回（前端 IT/实物资产页已按此方式实现） |
 | POST | `/api/cmdb/assets` | 新增资产（请求体为资产字段）。编号重复 / 名称为空返回 400 |
 | POST | `/api/cmdb/assets/batch-update` | 批量更新盘点时间 `{ids:[int], inventory_time:"YYYY-MM-DD"}` |
 | POST | `/api/cmdb/assets/batch-delete` | 批量删除 `{ids:[int]}` |

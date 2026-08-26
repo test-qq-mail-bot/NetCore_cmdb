@@ -9,7 +9,7 @@
 """
 from typing import List
 
-from plugins.cmdb import common
+from plugins.NetCore_cmdb import common
 
 
 def _get_ports(conn, asset_id: int) -> List[dict]:
@@ -39,7 +39,10 @@ def _replace_ports(conn, asset_id: int, ports: List[dict], is_network_device=Non
     """
     conn.execute("DELETE FROM ports WHERE asset_id=?", (asset_id,))
     for p in ports:
-        num = int(p.get("port_num") or 0)
+        try:
+            num = int(p.get("port_num") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("端口号必须为正整数：%r" % (p.get("port_num"),))
         if num <= 0:
             continue
         conn.execute(

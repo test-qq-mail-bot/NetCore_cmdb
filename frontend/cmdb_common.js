@@ -202,7 +202,7 @@ template: `
               <el-collapse-item v-if="isIT" title="系统信息" name="sysinfo">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
                   <el-button size="small" @click="addSysInfoRow">添加系统信息</el-button>
-                  <span style="font-size:12px;color:#64748b;">IP / 账号 / 登录方式，可添加多条；已有密码加密存储（不再在编辑页显示）；登录方式选「其他」时可填写自定义方式</span>
+                  <span style="font-size:12px;color:#64748b;">IP / 账号 / 登录方式，可添加多条；登录方式选「其他」时可填写自定义方式</span>
                 </div>
                 <el-table :data="sfApply(systemInfo)" size="small" border style="width:100%;" @sort="sfOnSort" @filter="sfOnFilter">
                   <el-table-column label="IP 地址" min-width="120"><template #header><nc-sf-th label="IP 地址" sort-key="ip" filter-key="ip" prop="ip" :source="sfCandidates(systemInfo, 'ip')" @sort="sfOnSort" @filter="sfOnFilter"></nc-sf-th></template><template #default="{row}"><el-input v-model="row.ip" size="small" placeholder="192.168.1.1"></el-input></template></el-table-column>
@@ -337,7 +337,7 @@ template: `
                 const r = await http.get('/api/cmdb/assets/' + id); return r.data;
             },
             addSysInfoRow() {
-                this.systemInfo.push({ ip: '', login_method: 'SSH', custom_method: '', port: '', username: '', password: '', note: '' });
+                this.systemInfo.push({ ip: '', login_method: 'SSH', custom_method: '', port: '', username: '', note: '' });
             },
             addPortRow() {
                 const max = this.ports.reduce((mx, p) => Math.max(mx, parseInt(p.port_num) || 0), 0);
@@ -365,7 +365,7 @@ template: `
                 payload.inventory_time = this.form.inventory_time || null;
                 payload.ports = this.ports.filter(p => parseInt(p.port_num) > 0);
                 // 系统信息：保留 config 中的其他键，仅覆盖 system_info（空行过滤；自定义登录方式也算有内容）
-                const sysInfo = this.systemInfo.filter(s => (s.ip || s.username || s.password || s.custom_method || '').toString().trim());
+                const sysInfo = this.systemInfo.filter(s => (s.ip || s.username || s.custom_method || '').toString().trim());
                 payload.config = Object.assign({}, this.origConfig, { system_info: sysInfo });
                 this.saving = true;
                 try {
@@ -433,8 +433,7 @@ template: `
               </el-col>
             </el-row>
             <div v-if="systemInfoList.length" style="margin-top:16px;">
-              <!-- 系统信息取消「密码」模块——密码已加密存储且不在详情页
-                   展示（敏感信息防泄漏），仅保留 IP/登录方式/端口/账号/备注 -->
+              <!-- 系统信息：仅展示 IP/登录方式/端口/账号/备注，不再保存密码 -->
               <h4 style="margin:0 0 8px;color:#4361ee;">系统信息</h4>
               <el-table :data="sfApply(systemInfoList)" size="small" border @sort="sfOnSort" @filter="sfOnFilter">
                 <el-table-column prop="ip" label="IP 地址" min-width="130"><template #header><nc-sf-th label="IP 地址" sort-key="ip" filter-key="ip" prop="ip" :source="sfCandidates(systemInfoList, 'ip')" @sort="sfOnSort" @filter="sfOnFilter"></nc-sf-th></template></el-table-column>
@@ -568,7 +567,7 @@ template: `
                 const a = this.asset;
                 const w = window.open('', '_blank', 'width=520,height=380');
                 if (!w) { this.$message.error('打印窗口被拦截，请允许本站弹窗后重试'); return; }
-                const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+                const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
                 const loc = a.rack_id ? (a.rack_id + ' ' + a.u_start + 'U') : (a.location || '-');
                 // 二维码内容：封装资产关键信息，扫码即可查看（纯离线生成，不依赖后端）
                 const qrText = [

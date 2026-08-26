@@ -5,7 +5,7 @@ report_by_dept    按部门汇总（数量 + 原值合计）
 """
 from typing import List
 
-from plugins.cmdb import common
+from plugins.NetCore_cmdb import common
 
 
 def report_inventory() -> List[dict]:

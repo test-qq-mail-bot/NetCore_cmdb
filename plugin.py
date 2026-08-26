@@ -19,8 +19,8 @@ from core.audit import audit_log
 from core.auth import get_current_user
 from core.logger import get_logger
 from plugins.base_plugin import BasePlugin
-from plugins.cmdb import common
-from plugins.cmdb.modules import assets, racks, ports, dashboard, maintenance, reports, backup, import_csv
+from plugins.NetCore_cmdb import common
+from plugins.NetCore_cmdb.modules import assets, racks, ports, dashboard, maintenance, reports, backup, import_csv
 
 logger = get_logger()
 
@@ -57,7 +57,7 @@ class CMDBPlugin(BasePlugin):
             "name": "cmdb",
             # IT 资产详情-系统信息取消「密码」模块（移除显示密码按钮与密码列，
             # 密码已加密存储且不再展示，防敏感信息泄漏）
-            "version": "20260824-V2",
+            "version": "20260826-V3",
             "description": "资产配置管理（CMDB）：资产台账、机柜 U 位、维保与报表",
             "author": "NetCore Team",
         }
@@ -81,7 +81,7 @@ class CMDBPlugin(BasePlugin):
         @router.get("/assets")
         async def list_assets(
             page: int = Query(1, ge=1),
-            size: int = Query(20, ge=1, le=10000),
+            size: int = Query(20, ge=1, le=200),
             search: str = None,
             category: str = None,
             exclude_category: str = None,
@@ -195,7 +195,11 @@ class CMDBPlugin(BasePlugin):
             if assets.get_asset(asset_id) is None:
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=404, content={"detail": "资产不存在"})
-            assets.update_asset(asset_id, {"ports": req.get("ports", [])})
+            try:
+                assets.update_asset(asset_id, {"ports": req.get("ports", [])})
+            except ValueError as e:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=400, content={"success": False, "detail": str(e)})
             audit_log("cmdb_port_update", "更新端口配置 资产ID=%d" % asset_id, "success", username=user)
             return {"success": True}
 
@@ -281,6 +285,11 @@ class CMDBPlugin(BasePlugin):
             format: str = "html",
             user: str = Depends(get_current_user),
         ):
+            # 审查报告 问题6：type 白名单校验
+            REPORT_TYPES = ("inventory", "dept", "warranty")
+            if type not in REPORT_TYPES:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=400, content={"detail": "type 仅支持 inventory/dept/warranty"})
             if type == "dept":
                 rows = reports.report_by_dept()
                 headers = ["部门", "资产数", "原值合计(¥)"]
@@ -301,11 +310,17 @@ class CMDBPlugin(BasePlugin):
                          r["dept"], r["location"], r["status"], r["price"], r["warranty_expire"]] for r in rows]
                 title = "资产盘点报表"
             if format == "csv":
+                # 审查报告 问题3：CSV 公式注入消毒
+                _CSV_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+                def _csv_safe(v):
+                    if isinstance(v, str) and v[:1] in _CSV_PREFIXES:
+                        return "'" + v
+                    return v
                 buf = io.StringIO()
                 w = csv.writer(buf)
                 w.writerow(headers)
                 for r in data:
-                    w.writerow(r)
+                    w.writerow([_csv_safe(c) for c in r])
                 # 带 UTF-8 BOM 并声明 charset，否则 Excel 打开中文报表会乱码（与导入模板保持一致）
                 return Response(content="\ufeff" + buf.getvalue(),
                                 media_type="text/csv; charset=utf-8",

@@ -5,7 +5,7 @@ list_racks 与 get_rack 会附带该机柜内设备列表（_rack_devices）。
 """
 from typing import Dict, List, Optional
 
-from plugins.cmdb import common
+from plugins.NetCore_cmdb import common
 
 
 def create_rack(data: dict) -> int:

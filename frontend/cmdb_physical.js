@@ -155,12 +155,21 @@
             daysLeft(row) { if (!row.warranty_expire) return null; const t = new Date(); t.setHours(0,0,0,0); const e = new Date(row.warranty_expire); e.setHours(0,0,0,0); return Math.round((e - t) / 86400000); },
             warrantyType(row) { const d = this.daysLeft(row); if (d === null) return 'info'; return d < 0 ? 'danger' : d <= 30 ? 'warning' : 'success'; },
             warrantyText(row) { const d = this.daysLeft(row); if (d === null) return '无维保'; return d < 0 ? '已过保'+(-d)+'天' : '剩余'+d+'天'; },
-            // 全量拉前端（后端分页上限 10000），客户端筛选/排序/分页
+            // 全量拉前端：后端单页上限 200（size>200 返回 422），
+            // 按 total 循环分页取完再合并（上限 1 万条，与旧版一致），客户端筛选/排序/分页
             async load() {
                 try {
-                    const params = { page: 1, size: 10000, exclude_category: 'IT设备' };
-                    const r = await http.get('/api/cmdb/assets', { params });
-                    this.allRows = r.data.assets || [];
+                    const PAGE_SIZE = 200, MAX_ROWS = 10000;
+                    const baseParams = { size: PAGE_SIZE, exclude_category: 'IT设备' };
+                    const first = await http.get('/api/cmdb/assets', { params: Object.assign({ page: 1 }, baseParams) });
+                    const rows = first.data.assets || [];
+                    const pages = Math.ceil(Math.min(first.data.total || 0, MAX_ROWS) / PAGE_SIZE);
+                    if (pages > 1) {
+                        const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, i) =>
+                            http.get('/api/cmdb/assets', { params: Object.assign({ page: i + 2 }, baseParams) })));
+                        rest.forEach(r => { rows.push.apply(rows, r.data.assets || []); });
+                    }
+                    this.allRows = rows;
                     this.page = 1;
                 } catch (e) { this.$message.error('加载失败'); }
             },

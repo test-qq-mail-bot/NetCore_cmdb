@@ -1,5 +1,5 @@
 """modules/dashboard.py - 资产仪表盘统计"""
-from plugins.cmdb import common
+from plugins.NetCore_cmdb import common
 
 
 def dashboard_stats() -> dict:

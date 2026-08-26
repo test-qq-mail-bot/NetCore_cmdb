@@ -13,12 +13,12 @@ db.py - CMDB 插件兼容再导出层（向后兼容）
 
 本文件仅做符号再导出。截至当前版本，仓库内已无任何模块 import 它
 （__init__.py 只导入 common，tests/smoke_cmdb.py 只导入 common 与 plugin），
-保留它是因为 build_generated.spec 仍把 "plugins.cmdb.db" 列为 hiddenimports，
-且外部脚本可能沿用 `from plugins.cmdb import db` 的旧写法。
+保留它是因为 build_generated.spec 仍把 "plugins.NetCore_cmdb.db" 列为 hiddenimports，
+且外部脚本可能沿用 `from plugins.NetCore_cmdb import db` 的旧写法。
 新代码请直接使用 common 与各 modules 子包，勿在此新增业务逻辑。
 """
-from plugins.cmdb import common
-from plugins.cmdb.modules import assets, racks, ports, dashboard, maintenance, reports, backup
+from plugins.NetCore_cmdb import common
+from plugins.NetCore_cmdb.modules import assets, racks, ports, dashboard, maintenance, reports, backup
 
 # —— 数据层符号（common） ——
 DB_PATH = common.DB_PATH
