@@ -28,11 +28,14 @@ def create_rack(data: dict) -> int:
 
 
 def update_rack(rack_id: str, data: dict) -> bool:
-    """更新机柜信息（名称/位置/总U数/状态/备注等，rack_id 本身不可改）。
+    """更新机柜信息（名称/位置/总U数/状态/备注等，rack_id 支持修改）。
 
     调小总U数时会校验是否会让已上架设备越界，越界则抛 ValueError（路由层转 400），
     否则这些设备将从机柜视图中"消失"（前端按 total_u 渲染 U 位列表）。
+
+    修改 rack_id 时会级联更新 assets 表中引用旧 rack_id 的记录。
     """
+    new_rack_id = (data.get("rack_id") or "").strip()
     mapping = {
         "name": "name",
         "location": "location",
@@ -55,6 +58,10 @@ def update_rack(rack_id: str, data: dict) -> bool:
                 val = float(val or 0)
             fields.append("%s=?" % col)
             values.append(val)
+    # 处理 rack_id 修改
+    if new_rack_id and new_rack_id != rack_id:
+        fields.append("rack_id=?")
+        values.append(new_rack_id)
     if not fields:
         return False
     values.append(rack_id)
@@ -72,6 +79,12 @@ def update_rack(rack_id: str, data: dict) -> bool:
                         "总U数不能调整为 %dU：设备「%s」已占用至 %dU，请先下架或调整该设备"
                         % (new_total, d["name"] or d["id"], end_u)
                     )
+        # 级联更新 assets 表中引用旧 rack_id 的记录
+        if new_rack_id and new_rack_id != rack_id:
+            existing = conn.execute("SELECT rack_id FROM racks WHERE rack_id=?", (new_rack_id,)).fetchone()
+            if existing:
+                raise ValueError("机柜编号 %s 已存在，不能重复" % new_rack_id)
+            conn.execute("UPDATE assets SET rack_id=? WHERE rack_id=?", (new_rack_id, rack_id))
         cur = conn.execute("UPDATE racks SET %s WHERE rack_id=?" % ", ".join(fields), values)
         conn.commit()
         return cur.rowcount > 0

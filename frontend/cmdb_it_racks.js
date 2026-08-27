@@ -11,7 +11,7 @@
             <el-col v-for="rk in racks" :key="rk.rack_id" :span="8" style="margin-bottom:16px;">
               <div class="cmdb-rack-card" @click="openRack(rk)">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
-                  <b>{{rk.rack_id}}</b>
+                  <b>{{rk.name || rk.rack_id}}</b>
                   <span>
                     <el-button size="small" text type="primary" @click.stop="openRackEdit(rk)">编辑</el-button>
                     <el-button size="small" text type="danger" @click.stop="deleteRack(rk)">删除</el-button>
@@ -65,7 +65,7 @@
           <el-dialog v-model="rackFormVisible" :title="rackFormIsEdit ? '编辑机柜' : '新建机柜'" width="520px">
             <el-form :model="rackForm" label-width="90px" size="small">
               <el-form-item label="机柜编号" required>
-                <el-input v-model="rackForm.rack_id" :disabled="rackFormIsEdit" placeholder="如 A-01（创建后不可改）"></el-input>
+                <el-input v-model="rackForm.rack_id" placeholder="留空自动生成（ITJG-日期-序号）"></el-input>
               </el-form-item>
               <el-form-item label="名称"><el-input v-model="rackForm.name" placeholder="机柜名称"></el-input></el-form-item>
               <el-form-item label="位置"><el-input v-model="rackForm.location" placeholder="如 机房A区 3排"></el-input></el-form-item>
@@ -86,7 +86,7 @@
           </el-dialog>
         </div>`,
         data() { return { racks: [], rackVisible: false, rackView: {},
-            rackFormVisible: false, rackFormIsEdit: false, rackSaving: false,
+            rackFormVisible: false, rackFormIsEdit: false, rackSaving: false, _editOrigRackId: '',
             rackForm: { rack_id: '', name: '', location: '', total_u: 42, status: '使用中', note: '' } }; },
         methods: {
             async loadRacks() { try { const r = await http.get('/api/cmdb/racks'); this.racks = r.data.racks || []; } catch (e) {} },
@@ -104,16 +104,32 @@
             },
             openRackEdit(rk) {
                 this.rackFormIsEdit = true;
+                this._editOrigRackId = rk.rack_id;
                 this.rackForm = { rack_id: rk.rack_id, name: rk.name || '', location: rk.location || '',
                     total_u: rk.total_u || 42, status: rk.status || '使用中', note: rk.note || '' };
                 this.rackFormVisible = true;
             },
             async saveRack() {
+                // 自动生成机柜编号：留空时按 ITJG-YYYYMMDD-XX 规则生成
+                if (!this.rackForm.rack_id || !this.rackForm.rack_id.trim()) {
+                    const today = new Date();
+                    const dateStr = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+                    const prefix = 'ITJG-' + dateStr + '-';
+                    const existing = this.racks.filter(rk => rk.rack_id && rk.rack_id.startsWith(prefix));
+                    let maxSeq = -1;
+                    for (const rk of existing) {
+                        const seqStr = rk.rack_id.substring(prefix.length);
+                        const seq = parseInt(seqStr, 10);
+                        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+                    }
+                    this.rackForm.rack_id = prefix + String(maxSeq + 1).padStart(2, '0');
+                }
                 if (!this.rackForm.rack_id) { this.$message.warning('请填写机柜编号'); return; }
                 this.rackSaving = true;
                 try {
                     if (this.rackFormIsEdit) {
-                        await http.put('/api/cmdb/racks/' + encodeURIComponent(this.rackForm.rack_id), {
+                        await http.put('/api/cmdb/racks/' + encodeURIComponent(this._editOrigRackId || this.rackForm.rack_id), {
+                            rack_id: this.rackForm.rack_id,
                             name: this.rackForm.name, location: this.rackForm.location,
                             total_u: this.rackForm.total_u, status: this.rackForm.status, note: this.rackForm.note });
                         this.$message.success('机柜已更新');

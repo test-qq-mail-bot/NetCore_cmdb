@@ -25,7 +25,7 @@ EXPORT_RACK_FIELDS = [
     "purchase_date", "price", "warranty_months", "warranty_expire", "note",
 ]
 EXPORT_PORT_FIELDS = [
-    "port_num", "name", "speed", "remote_device", "remote_port", "note", "status",
+    "port_num", "name", "speed", "remote_device", "remote_port", "remote_asset_id", "note", "status",
 ]
 
 

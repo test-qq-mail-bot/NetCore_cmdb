@@ -68,6 +68,8 @@
                     { label: '资产编号', prop: 'asset_no', width: 140, sortable: true, filterable: true },
                     { label: '名称', prop: 'name', minWidth: 150, sortable: true, filterable: true, slotName: 'col-name' },
                     { label: '子类', prop: 'subtype', width: 110, sortable: true, filterable: true, slotName: 'col-subtype' },
+                    { label: '品牌', prop: 'brand', width: 90, sortable: true, filterable: true },
+                    { label: '颜色', prop: 'color', width: 80, sortable: true, filterable: true },
                     { label: '使用人', prop: 'user', width: 90, sortable: true, filterable: true },
                     { label: '位置', prop: 'location', minWidth: 120, sortable: true, filterable: true },
                     { label: '状态', prop: 'status', width: 90, sortable: true, filterable: true, slotName: 'col-status' },

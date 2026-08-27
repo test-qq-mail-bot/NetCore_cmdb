@@ -12,7 +12,7 @@ def report_inventory() -> List[dict]:
     conn = common._connect()
     try:
         rows = conn.execute(
-            "SELECT asset_no, name, category, subtype, user, dept, location, status, price, warranty_expire FROM assets WHERE category <> '机柜' ORDER BY id"
+            "SELECT asset_no, name, category, subtype, brand, user, dept, location, status, color, price, warranty_expire FROM assets WHERE category <> '机柜' ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:

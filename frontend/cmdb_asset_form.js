@@ -151,19 +151,20 @@
                   <el-table-column label="速率" min-width="70"><template #default="{row}"><el-input v-model="row.speed" size="small"></el-input></template></el-table-column>
                   <el-table-column label="MAC 地址" min-width="120"><template #default="{row}"><el-input v-model="row.mac" size="small" placeholder="AA:BB:CC:DD:EE:FF"></el-input></template></el-table-column>
                   <el-table-column label="IP 地址" min-width="120"><template #default="{row}"><el-input v-model="row.ip" size="small" placeholder="192.168.1.1"></el-input></template></el-table-column>
-                  <el-table-column label="对端设备" min-width="120"><template #default="{row}">
-                    <el-select v-model="row.remote_device_id" size="small" filterable clearable placeholder="选择资产" style="width:100%"
+                  <el-table-column label="对端设备" min-width="140"><template #default="{row}">
+                    <el-select v-model="row.remote_device_id" size="small" filterable clearable placeholder="选择IT资产" style="width:100%"
                                @change="onRemoteDeviceChange(row, $event)">
                       <el-option v-for="a in assetListOptions" :key="a.id" :label="a.name + ' (' + a.asset_no + ')'" :value="a.id"></el-option>
                     </el-select>
-                    <el-input v-if="!row.remote_device_id" v-model="row.remote_device" size="small" placeholder="或手动输入" style="margin-top:4px;"></el-input>
+                    <el-input v-if="!row.remote_device_id" v-model="row.remote_device" size="small" placeholder="或手动输入设备名" style="margin-top:4px;"></el-input>
                   </template></el-table-column>
-                  <el-table-column label="对端端口" min-width="100"><template #default="{row}">
-                    <el-select v-if="row.remote_device_id && row.remote_ports.length" v-model="row.remote_port" size="small" filterable clearable placeholder="选择端口" style="width:100%"
+                  <el-table-column label="对端端口名称" min-width="140"><template #default="{row}">
+                    <el-input v-model="row.remote_port" size="small" placeholder="输入端口名称（自定义或匹配已有）"></el-input>
+                    <el-select v-if="row.remote_device_id && row.remote_ports.length" v-model="row.remote_port" size="small" filterable clearable
+                               placeholder="或从对端设备已有端口选择" style="width:100%;margin-top:4px;"
                                @change="onRemotePortChange(row, $event)">
                       <el-option v-for="p in row.remote_ports" :key="p.port_num" :label="p.name || ('#' + p.port_num)" :value="p.name || ('#' + p.port_num)"></el-option>
                     </el-select>
-                    <el-input v-else v-model="row.remote_port" size="small" placeholder="或手动输入"></el-input>
                   </template></el-table-column>
                   <el-table-column label="备注" min-width="70"><template #default="{row}"><el-input v-model="row.note" size="small"></el-input></template></el-table-column>
                   <el-table-column label="状态" min-width="105"><template #default="{row}">
@@ -218,7 +219,8 @@
                 }
                 this.rackOptions = (await this._racks()).slice();
                 if (this.isIT) {
-                    this.assetListOptions = (await this._allAssets()).slice();
+                    const all = (await this._allAssets()).slice();
+                    this.assetListOptions = all.filter(a => a.category === 'IT设备');
                 } else {
                     this.assetListOptions = [];
                 }
@@ -238,7 +240,12 @@
                         inventory_time: a.inventory_time || '',
                     });
                     this.form = f;
-                    this.ports = (a.ports || []).map(p => Object.assign({}, p, { remote_device_id: null, remote_ports: [] }));
+                    this.ports = (a.ports || []).map(p => Object.assign({}, p, {
+                        remote_device_id: p.remote_asset_id || null,
+                        remote_ports: [],
+                        _orig_remote_device_id: p.remote_asset_id || null,
+                        _orig_remote_port: p.remote_port || '',
+                    }));
                     this.origConfig = Object.assign({}, a.config || {});
                     this.systemInfo = (this.origConfig.system_info || []).map(s => Object.assign({}, s));
                 } else {
@@ -253,7 +260,7 @@
             onCategoryChange() {
                 if (!this.isEdit) this.form.subtype = '';
                 if (!this.isIT) { this.form.rack_id = ''; this.form.u_start = null; this.form.u_height = null; this.ports = []; this.systemInfo = []; this.assetListOptions = []; }
-                else { this._allAssets().then(list => { this.assetListOptions = list; }); }
+                else { this._allAssets().then(list => { this.assetListOptions = list.filter(a => a.category === 'IT设备'); }); }
             },
             async _racks() {
                 try { const r = await http.get('/api/cmdb/racks'); return r.data.racks || []; }
@@ -350,17 +357,43 @@
                         const r = await http.post('/api/cmdb/assets', payload);
                         this.$message.success('资产已创建：' + (r.data.asset_no || ''));
                     }
-                    // 保存成功后自动同步对端端口
+                    // 保存成功后自动同步对端端口（区分自定义/下拉选择）
                     if (this.isIT) {
-                        const syncPorts = portsData.filter(p => p.remote_device_id && p.remote_port);
+                        const localId = this.assetId || (this.form && this.form.id);
+                        // 清理旧关联：原有关联被清空或变更时，清空旧对端设备上的关联
+                        for (const p of this.ports) {
+                            const origDev = p._orig_remote_device_id;
+                            const origPort = p._orig_remote_port;
+                            const curDev = p.remote_device_id;
+                            const curPort = p.remote_port || '';
+                            if (origDev && origPort && (!curDev || curDev !== origDev || curPort !== origPort)) {
+                                try {
+                                    await http.post('/api/cmdb/ports/sync-remote', {
+                                        local_asset_id: localId,
+                                        local_port_num: p.port_num,
+                                        remote_asset_id: origDev,
+                                        remote_port_name: origPort,
+                                    });
+                                } catch (_) {}
+                            }
+                        }
+                        // 建立新关联
+                        const syncPorts = this.ports.filter(p => p.remote_device_id && p.remote_port);
                         for (const sp of syncPorts) {
+                            // 判断是自定义输入还是下拉选择：检查值是否在 remote_ports 列表中
+                            const isExisting = sp.remote_ports.some(rp => (rp.name || ('#' + rp.port_num)) === sp.remote_port);
+                            const payload_sync = {
+                                local_asset_id: localId,
+                                local_port_num: sp.port_num,
+                                remote_asset_id: sp.remote_device_id,
+                                remote_port_name: sp.remote_port,
+                            };
+                            if (!isExisting) {
+                                // 场景一：自定义输入，传 custom_port_name 让后端自动创建
+                                payload_sync.custom_port_name = sp.remote_port;
+                            }
                             try {
-                                const sr = await http.post('/api/cmdb/ports/sync-remote', {
-                                    local_asset_id: this.assetId || (this.form.id),
-                                    local_port_num: sp.port_num,
-                                    remote_asset_id: sp.remote_device_id,
-                                    remote_port_name: sp.remote_port,
-                                });
+                                const sr = await http.post('/api/cmdb/ports/sync-remote', payload_sync);
                                 if (sr.data.action === 'conflict') {
                                     const det = sr.data.detail || {};
                                     try {
@@ -368,13 +401,7 @@
                                             '对端端口「' + sp.remote_port + '」已连接到 ' + (det.remote_device || '其他设备') +
                                             ' 的 ' + (det.remote_port || '-') + '，是否覆盖为本端连接？',
                                             '对端端口冲突', { type: 'warning', confirmButtonText: '覆盖', cancelButtonText: '取消' });
-                                        await http.post('/api/cmdb/ports/sync-remote', {
-                                            local_asset_id: this.assetId || (this.form.id),
-                                            local_port_num: sp.port_num,
-                                            remote_asset_id: sp.remote_device_id,
-                                            remote_port_name: sp.remote_port,
-                                            force: true,
-                                        });
+                                        await http.post('/api/cmdb/ports/sync-remote', Object.assign({}, payload_sync, { force: true }));
                                     } catch (_) {}
                                 }
                             } catch (_) {}

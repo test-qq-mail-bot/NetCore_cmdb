@@ -121,6 +121,7 @@ def init_db():
             ip TEXT,
             remote_device TEXT,
             remote_port TEXT,
+            remote_asset_id INTEGER,
             note TEXT,
             status TEXT DEFAULT 'disconnected',
             FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
@@ -160,6 +161,8 @@ def init_db():
             for col in ("mac", "ip"):
                 if col not in pcols:
                     conn.execute("ALTER TABLE ports ADD COLUMN %s TEXT" % col)
+            if "remote_asset_id" not in pcols:
+                conn.execute("ALTER TABLE ports ADD COLUMN remote_asset_id INTEGER")
             conn.commit()
         except sqlite3.DatabaseError:
             pass
@@ -353,99 +356,151 @@ def seed_if_empty(force: bool = False):
                 "INSERT INTO racks (rack_id,name,location,total_u,status,contract_no,supplier,purchase_date,price,warranty_months,warranty_expire) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 rk,
             )
-        # —— 资产（机柜以外的；编号格式 前缀-采购日期-2位序号，13 条互不相同）——
-        # 覆盖设计：分类 3 种 / 状态 6 种全（使用中/维修中/在库/闲置/运行中/报废）/
-        # 机柜上架与散置并存 / 有无端口并存 / 系统信息有无并存 / 备注与盘点时间空实并存，
-        # 人工验收无需再逐项造数。
+        # —— 资产（机柜以外的；编号格式 前缀-采购日期-2位序号，15 条互不相同）——
+        # 网络拓扑（端口双向互指）：
+        #   Internet → Huawei AR6140 (路由器) GE0/0/0 ↔ Cisco 93180 Eth1/3
+        #   Huawei AR6140 GE0/0/1 ↔ Sangfor AF-1000 (防火墙) Port1
+        #   Cisco 93180 Eth1/1 ↔ Dell R750 (服务器) eth0
+        #   Cisco 93180 Eth1/2 ↔ Dell R750 eth1
+        #   Cisco 93180 Eth1/48 ↔ Sangfor AF-1000 Port2
+        #   H3C S5130S (接入交换机) G1/0/1 ↔ Aruba AP-535 Eth0
+        #   H3C S5130S G1/0/24 ↔ 打印机 LAN
         assets = [
-            # 1) IT-笔记本：常规办公资产，无端口/机柜，系统信息 1 条
-            ("IT-20240115-00", "ThinkPad X1 Carbon", "IT设备", "笔记本", "张三", "研发部", "B栋302-01",
-             "使用中", "联想", "X1 Carbon Gen12", "PF-3AB2C4D5", "黑色", "1TB SSD", "32GB",
-             "HT-2024-0015", "联想官方旗舰店", "2024-01-15", 12800, 36, "2027-01-14",
-             '{"system_info":[{"ip":"192.168.1.101","login_method":"SSH","port":22,"username":"zhangsan","note":"办公笔记本"}]}',
-             "研发主力开发机", None, None, None, 0, "2026-06-30", []),
-            # 2) IT-服务器：机柜上架 + 2 端口 + 2 条系统信息
+            # ── IT 设备（7 台，覆盖服务器/交换机/路由器/防火墙/AP/笔记本/手机/台式机）──
+            # 1) Dell PowerEdge R750 — 服务器，CAB-A02 U12，2U
+            #    eth0 ↔ Cisco 93180 Eth1/1    eth1 ↔ Cisco 93180 Eth1/2
             ("IT-20230601-01", "Dell PowerEdge R750", "IT设备", "服务器", "管理员", "IT部", "A栋数据中心",
              "使用中", "戴尔", "R750", "DL-8821XY", "银灰色", "4×1.92TB SSD", "256GB",
              "HT-2023-0088", "戴尔中国", "2023-06-01", 68500, 36, "2026-05-31",
              '{"system_info":[{"ip":"10.10.10.5","login_method":"SSH","port":22,"username":"root","note":"业务服务器"},{"ip":"10.10.10.6","login_method":"Web","port":443,"username":"admin","note":"带外管理"}]}',
              "核心业务服务器，变更前请报备", "CAB-A02", 12, 2, 1, "2026-05-20", [
-                {"port_num": 1, "name": "eth0", "speed": "100GbE", "mac": "D4:BE:D9:11:22:33", "ip": "10.10.10.5", "remote_device": "Cisco 93180", "remote_port": "Eth1/1", "note": "业务口", "status": "connected"},
-                {"port_num": 2, "name": "eth1", "speed": "100GbE", "mac": "D4:BE:D9:11:22:34", "ip": "10.10.10.6", "remote_device": "Cisco 93180", "remote_port": "Eth1/2", "note": "带外", "status": "connected"},
+                {"port_num": 1, "name": "eth0", "speed": "100GbE", "mac": "D4:BE:D9:11:22:33", "ip": "10.10.10.5",
+                 "remote_device": "Cisco Nexus 93180", "remote_port": "Eth1/1", "remote_asset_id": None, "note": "业务口", "status": "connected"},
+                {"port_num": 2, "name": "eth1", "speed": "100GbE", "mac": "D4:BE:D9:11:22:34", "ip": "10.10.10.6",
+                 "remote_device": "Cisco Nexus 93180", "remote_port": "Eth1/2", "remote_asset_id": None, "note": "带外", "status": "connected"},
              ]),
-            # 3) IT-交换机（思科）：机柜 + 4 端口 + 系统信息
+            # 2) Cisco Nexus 93180 — 核心交换机，CAB-A02 U24，1U
+            #    Eth1/1 ↔ Dell R750 eth0    Eth1/2 ↔ Dell R750 eth1
+            #    Eth1/3 ↔ Huawei AR6140 GE0/0/0    Eth1/48 ↔ Sangfor AF-1000 Port2
             ("IT-20240301-02", "Cisco Nexus 93180", "IT设备", "交换机", "网络管理员", "IT部", "A栋数据中心",
              "使用中", "思科", "Nexus 93180YC-FX", "CS-7710AB", "黑色", "128GB SSD", "16GB",
              "HT-2024-0022", "思科金牌代理", "2024-03-01", 152000, 36, "2027-02-28",
              '{"system_info":[{"ip":"10.10.10.1","login_method":"Console","port":0,"username":"cisco","note":"核心交换机"}]}',
              "", "CAB-A02", 24, 1, 1, "2026-04-15", [
-                {"port_num": 1, "name": "Eth1/1", "speed": "100GbE", "mac": "00:1C:58:AA:BB:01", "ip": "", "remote_device": "Dell R750", "remote_port": "eth0", "note": "服务器", "status": "connected"},
-                {"port_num": 2, "name": "Eth1/2", "speed": "100GbE", "mac": "00:1C:58:AA:BB:02", "ip": "", "remote_device": "Dell R750", "remote_port": "eth1", "note": "带外", "status": "connected"},
-                {"port_num": 3, "name": "Eth1/3", "speed": "100GbE", "mac": "00:1C:58:AA:BB:03", "ip": "", "remote_device": "核心路由器", "remote_port": "GE0/0/0", "note": "上联", "status": "connected"},
-                {"port_num": 48, "name": "Eth1/48", "speed": "100GbE", "mac": "00:1C:58:AA:BB:30", "ip": "", "remote_device": "防火墙", "remote_port": "Port1", "note": "外网", "status": "connected"},
+                {"port_num": 1, "name": "Eth1/1", "speed": "100GbE", "mac": "00:1C:58:AA:BB:01", "ip": "",
+                 "remote_device": "Dell PowerEdge R750", "remote_port": "eth0", "remote_asset_id": None, "note": "服务器业务口", "status": "connected"},
+                {"port_num": 2, "name": "Eth1/2", "speed": "100GbE", "mac": "00:1C:58:AA:BB:02", "ip": "",
+                 "remote_device": "Dell PowerEdge R750", "remote_port": "eth1", "remote_asset_id": None, "note": "服务器带外", "status": "connected"},
+                {"port_num": 3, "name": "Eth1/3", "speed": "100GbE", "mac": "00:1C:58:AA:BB:03", "ip": "",
+                 "remote_device": "Huawei AR6140", "remote_port": "GE0/0/0", "remote_asset_id": None, "note": "上联路由器", "status": "connected"},
+                {"port_num": 48, "name": "Eth1/48", "speed": "100GbE", "mac": "00:1C:58:AA:BB:30", "ip": "",
+                 "remote_device": "Sangfor AF-1000", "remote_port": "Port2", "remote_asset_id": None, "note": "下联防火墙", "status": "connected"},
              ]),
-            # 4) IT-交换机（华三）：机柜 + 2 端口
-            ("IT-20240415-03", "H3C S5130S", "IT设备", "交换机", "网络管理员", "IT部", "B栋弱电间",
-             "使用中", "新华三", "S5130S-28P-EI", "H3-5520XX", "灰色", "32GB SSD", "8GB",
-             "HT-2024-0030", "H3C授权经销商", "2024-04-15", 8900, 36, "2027-04-14",
-             '{"system_info":[{"ip":"192.168.10.1","login_method":"Telnet","port":23,"username":"admin","note":"楼层接入"}]}',
-             "", "CAB-B05", 10, 1, 1, "2026-03-01", [
-                {"port_num": 1, "name": "G1/0/1", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:01", "ip": "", "remote_device": "AP-01", "remote_port": "Lan1", "note": "无线", "status": "connected"},
-                {"port_num": 24, "name": "G1/0/24", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:18", "ip": "", "remote_device": "打印机", "remote_port": "LAN", "note": "办公", "status": "disconnected"},
-             ]),
-            # 5) IT-路由器（华为）：机柜 + 2 端口
+            # 3) Huawei AR6140 — 路由器，CAB-A01 U5，1U
+            #    GE0/0/0 ↔ Cisco 93180 Eth1/3    GE0/0/1 ↔ Sangfor AF-1000 Port1
             ("IT-20240520-04", "Huawei AR6140", "IT设备", "路由器", "网络管理员", "IT部", "A栋数据中心",
              "使用中", "华为", "AR6140-9G-2AC", "HW-6140XY", "深灰色", "16GB Flash", "4GB",
              "HT-2024-0035", "华为企业网络", "2024-05-20", 24500, 24, "2026-05-19",
              '{"system_info":[{"ip":"10.0.0.1","login_method":"SSH","port":22,"username":"huawei","note":"出口路由"}]}',
              "", "CAB-A01", 5, 1, 1, "2026-02-28", [
-                {"port_num": 1, "name": "GE0/0/0", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:01", "ip": "10.0.0.1", "remote_device": "交换机", "remote_port": "Eth1/3", "note": "LAN", "status": "connected"},
-                {"port_num": 2, "name": "GE0/0/1", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:02", "ip": "", "remote_device": "防火墙", "remote_port": "Port2", "note": "WAN", "status": "connected"},
+                {"port_num": 1, "name": "GE0/0/0", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:01", "ip": "10.0.0.1",
+                 "remote_device": "Cisco Nexus 93180", "remote_port": "Eth1/3", "remote_asset_id": None, "note": "LAN口下联核心交换机", "status": "connected"},
+                {"port_num": 2, "name": "GE0/0/1", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:02", "ip": "",
+                 "remote_device": "Sangfor AF-1000", "remote_port": "Port1", "remote_asset_id": None, "note": "WAN口上联防火墙", "status": "connected"},
              ]),
-            # 6) IT-防火墙（深信服）：机柜 + 2 端口
+            # 4) Sangfor AF-1000 — 防火墙，CAB-A01 U8，1U
+            #    Port1 ↔ Huawei AR6140 GE0/0/1    Port2 ↔ Cisco 93180 Eth1/48
             ("IT-20231210-05", "Sangfor AF-1000", "IT设备", "防火墙", "安全管理员", "安全部", "A栋数据中心",
              "使用中", "深信服", "AF-1000-L1600", "SF-1000XY", "黑色", "240GB SSD", "8GB",
              "HT-2023-0150", "深信服科技", "2023-12-10", 58000, 12, "2024-12-09",
              '{"system_info":[{"ip":"10.0.0.254","login_method":"Web","port":443,"username":"admin","note":"边界防火墙"}]}',
              "", "CAB-A01", 8, 1, 1, "2026-01-15", [
-                {"port_num": 1, "name": "Port1", "speed": "1GbE", "mac": "00:0C:29:AB:CD:01", "ip": "", "remote_device": "路由器", "remote_port": "GE0/0/1", "note": "外网口", "status": "connected"},
-                {"port_num": 2, "name": "Port2", "speed": "1GbE", "mac": "00:0C:29:AB:CD:02", "ip": "", "remote_device": "交换机", "remote_port": "Eth1/48", "note": "内网口", "status": "connected"},
+                {"port_num": 1, "name": "Port1", "speed": "1GbE", "mac": "00:0C:29:AB:CD:01", "ip": "",
+                 "remote_device": "Huawei AR6140", "remote_port": "GE0/0/1", "remote_asset_id": None, "note": "WAN口上联路由器", "status": "connected"},
+                {"port_num": 2, "name": "Port2", "speed": "1GbE", "mac": "00:0C:29:AB:CD:02", "ip": "",
+                 "remote_device": "Cisco Nexus 93180", "remote_port": "Eth1/48", "remote_asset_id": None, "note": "LAN口下联核心交换机", "status": "connected"},
              ]),
-            # 7) IT-无线AP（安移通）：1 端口 + 系统信息
+            # 5) H3C S5130S — 接入交换机，CAB-B05 U10，1U
+            #    G1/0/1 ↔ Aruba AP-535 Eth0    G1/0/24 ↔ 打印机 LAN
+            ("IT-20240415-03", "H3C S5130S", "IT设备", "交换机", "网络管理员", "IT部", "B栋弱电间",
+             "使用中", "新华三", "S5130S-28P-EI", "H3-5520XX", "灰色", "32GB SSD", "8GB",
+             "HT-2024-0030", "H3C授权经销商", "2024-04-15", 8900, 36, "2027-04-14",
+             '{"system_info":[{"ip":"192.168.10.1","login_method":"Telnet","port":23,"username":"admin","note":"楼层接入"}]}',
+             "", "CAB-B05", 10, 1, 1, "2026-03-01", [
+                {"port_num": 1, "name": "G1/0/1", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:01", "ip": "",
+                 "remote_device": "Aruba AP-535", "remote_port": "Eth0", "remote_asset_id": None, "note": "下联无线AP", "status": "connected"},
+                {"port_num": 24, "name": "G1/0/24", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:18", "ip": "",
+                 "remote_device": "HP LaserJet Pro", "remote_port": "LAN", "remote_asset_id": None, "note": "下联打印机", "status": "connected"},
+             ]),
+            # 6) Aruba AP-535 — 无线AP，B栋走廊，无机柜
+            #    Eth0 ↔ H3C S5130S G1/0/1
             ("IT-20240601-06", "Aruba AP-535", "IT设备", "AP", "无线网络", "IT部", "B栋走廊",
              "使用中", "安移通", "AP-535", "AR-535XY", "白色", "8GB eMMC", "4GB",
              "HT-2024-0040", "Aruba代理商", "2024-06-01", 3200, 12, "2025-05-31",
              '{"system_info":[{"ip":"192.168.20.5","login_method":"Web","port":8443,"username":"aruba","note":"无线接入点"}]}',
              "", None, None, None, 1, "2026-06-01", [
-                {"port_num": 1, "name": "Eth0", "speed": "2.5GbE", "mac": "70:4F:57:12:34:56", "ip": "192.168.20.5", "remote_device": "交换机", "remote_port": "G1/0/1", "note": "POE供电", "status": "connected"},
+                {"port_num": 1, "name": "Eth0", "speed": "2.5GbE", "mac": "70:4F:57:12:34:56", "ip": "192.168.20.5",
+                 "remote_device": "H3C S5130S", "remote_port": "G1/0/1", "remote_asset_id": None, "note": "POE供电上联接入交换机", "status": "connected"},
              ]),
-            # 8) IT-手机：维修中状态
+            # 7) ThinkPad X1 Carbon — 笔记本，B栋302，无端口
+            ("IT-20240115-00", "ThinkPad X1 Carbon", "IT设备", "笔记本", "张三", "研发部", "B栋302-01",
+             "使用中", "联想", "X1 Carbon Gen12", "PF-3AB2C4D5", "黑色", "1TB SSD", "32GB",
+             "HT-2024-0015", "联想官方旗舰店", "2024-01-15", 12800, 36, "2027-01-14",
+             '{"system_info":[{"ip":"192.168.1.101","login_method":"SSH","port":22,"username":"zhangsan","note":"办公笔记本"}]}',
+             "研发主力开发机", None, None, None, 0, "2026-06-30", []),
+            # 8) iPhone 14 测试机 — 手机，维修中
             ("IT-20230901-07", "iPhone 14 测试机", "IT设备", "手机", "孙七", "测试部", "B栋405",
              "维修中", "苹果", "iPhone 14", "IP-14XY", "蓝色", "128GB", "6GB",
              "HT-2023-0005", "Apple Store", "2023-09-01", 6999, 12, "2024-08-31",
              '{}', "屏幕损坏送修中", None, None, None, 0, "2025-12-20", []),
-            # 9) IT-台式机：在库状态
+            # 9) HP EliteDesk 800 — 台式机，在库
             ("IT-20240701-08", "HP EliteDesk 800", "IT设备", "台式机", "", "行政部", "C栋仓库",
              "在库", "惠普", "EliteDesk 800 G9", "HP-800XY", "黑色", "512GB SSD", "16GB",
              "HT-2024-0050", "惠普授权经销商", "2024-07-01", 5600, 36, "2027-06-30",
              '{"system_info":[{"ip":"","login_method":"SSH","port":22,"username":"admin","note":"备用机"}]}',
              "", None, None, None, 0, "", []),
-            # 10) IT-旧笔记本：报废状态（覆盖「报废」选项）
+            # 10) ThinkPad T480 — 旧笔记本，报废
             ("IT-20191015-09", "ThinkPad T480 旧笔记本", "IT设备", "笔记本", "", "行政部", "C栋仓库",
              "报废", "联想", "ThinkPad T480", "PF-1A2B3C4D", "黑色", "256GB SSD", "8GB",
              "HT-2019-0102", "联想官方旗舰店", "2019-10-15", 9500, 36, "2022-10-14",
              '{}', "已过保且主板故障，待资产处置流程处理", None, None, None, 0, "2025-12-31", []),
-            # 11) 办公家具-工位桌：闲置状态
+            # 11) 自定义网络设备A — 自定义端口验证，CAB-A03 U1，1U
+            #    Uplink ↔ Cisco 93180 Eth1/48    Downlink1 无关联    CustomPort ↔ 自定义网络设备B Wan1
+            ("IT-20260827-00", "自定义网络设备A", "IT设备", "交换机", "测试员", "IT部", "A栋数据中心",
+             "使用中", "自定义", "CustSwitch-A", "CUST-A-001", "红色", "16GB Flash", "4GB",
+             "HT-2026-0001", "自定义供应商", "2026-08-27", 5000, 12, "2027-08-27",
+             '{}', "自定义端口验证设备A", "CAB-A03", 1, 1, 1, "2026-08-27", [
+                {"port_num": 1, "name": "Uplink", "speed": "10GbE", "mac": "AA:11:22:33:44:01", "ip": "",
+                 "remote_device": "Cisco Nexus 93180", "remote_port": "Eth1/48", "remote_asset_id": None, "note": "上联核心交换机", "status": "connected"},
+                {"port_num": 2, "name": "Downlink1", "speed": "1GbE", "mac": "AA:11:22:33:44:02", "ip": "",
+                 "remote_device": "", "remote_port": "", "remote_asset_id": None, "note": "下联空闲", "status": "disconnected"},
+                {"port_num": 3, "name": "CustomPort", "speed": "1GbE", "mac": "AA:11:22:33:44:03", "ip": "",
+                 "remote_device": "自定义网络设备B", "remote_port": "Wan1", "remote_asset_id": None, "note": "自定义端口互连", "status": "connected"},
+             ]),
+            # 12) 自定义网络设备B — 自定义端口验证，无机柜
+            #    Wan1 ↔ 自定义网络设备A CustomPort    Lan1 无关联
+            ("IT-20260827-01", "自定义网络设备B", "IT设备", "路由器", "测试员", "IT部", "B栋弱电间",
+             "使用中", "自定义", "CustRouter-B", "CUST-B-001", "绿色", "8GB Flash", "2GB",
+             "HT-2026-0002", "自定义供应商", "2026-08-27", 3500, 12, "2027-08-27",
+             '{}', "自定义端口验证设备B", None, None, None, 1, "2026-08-27", [
+                {"port_num": 1, "name": "Wan1", "speed": "1GbE", "mac": "BB:22:33:44:55:01", "ip": "",
+                 "remote_device": "自定义网络设备A", "remote_port": "CustomPort", "remote_asset_id": None, "note": "WAN口上联", "status": "connected"},
+                {"port_num": 2, "name": "Lan1", "speed": "1GbE", "mac": "BB:22:33:44:55:02", "ip": "192.168.50.1",
+                 "remote_device": "", "remote_port": "", "remote_asset_id": None, "note": "LAN口空闲", "status": "disconnected"},
+             ]),
+            # ── 办公家具（3 件，覆盖闲置/使用中）──
+            # 13) 员工工位桌 — 闲置
             ("OF-20231120-00", "员工工位桌", "办公家具", "工位桌", "李四", "市场部", "A栋201",
              "闲置", "震旦", "工位桌 1400×600", "OF-042XY", "原木色", "", "",
              "HT-2023-0100", "震旦家具", "2023-11-20", 1850, 60, "2028-11-19",
              '{}', "闲置中可调配", None, None, None, 0, "", []),
-            # 12) 办公家具-高管办公椅：使用中
+            # 14) 高管办公椅 — 使用中
             ("OF-20240210-01", "高管办公椅", "办公家具", "办公椅", "王五", "总经办", "C栋501",
              "使用中", "冈村", "Contessa", "OF-088XY", "黑色", "", "",
              "HT-2024-0008", "冈村中国", "2024-02-10", 4200, 60, "2029-02-09",
              '{}', "", None, None, None, 0, "2026-04-10", []),
-            # 13) 生产设备-CNC：运行中状态
+            # ── 生产设备（2 台，覆盖运行中）──
+            # 15) CNC加工中心 — 运行中
             ("PE-20220512-00", "CNC加工中心", "生产设备", "机床", "赵六", "生产部", "1号厂房A区",
              "运行中", "沈阳机床", "VMC-850", "CNC-056XY", "蓝色", "", "",
              "HT-2022-0030", "沈阳机床集团", "2022-05-12", 285000, 36, "2025-05-11",
@@ -471,6 +526,25 @@ def seed_if_empty(force: bool = False):
             )
             aid = cur.lastrowid
             _ports._replace_ports(conn, aid, ports)
+
+        # —— 后处理：按 remote_device 名称匹配资产 ID，建立端口双向关联 ——
+        name_to_id = {}
+        for row in conn.execute("SELECT id, name FROM assets"):
+            name_to_id[row["name"]] = row["id"]
+        updated = 0
+        for port_row in conn.execute(
+            "SELECT id, asset_id, remote_device, remote_port FROM ports WHERE remote_device IS NOT NULL AND remote_device != ''"
+        ):
+            remote_id = name_to_id.get(port_row["remote_device"])
+            if remote_id and remote_id != port_row["asset_id"]:
+                conn.execute(
+                    "UPDATE ports SET remote_asset_id=? WHERE id=?",
+                    (remote_id, port_row["id"]),
+                )
+                updated += 1
+        if updated:
+            logger.info("播种数据端口关联：已建立 %d 条 remote_asset_id 关联", updated)
+
         conn.commit()
         return True
     finally:
@@ -531,5 +605,5 @@ def restore_demo_data() -> dict:
         conn.close()
     ok = seed_if_empty(force=True)
     if ok:
-        return {"success": True, "message": "已恢复演示数据：13 个资产、5 个机柜"}
+        return {"success": True, "message": "已恢复演示数据：15 个资产、5 个机柜"}
     return {"success": False, "message": "恢复演示数据失败，请检查数据库是否可写"}

@@ -29,8 +29,13 @@ def get_ports(asset_id: int) -> List[dict]:
 
 def sync_remote_port(conn, local_asset_id: int, local_port_num: int,
                      remote_asset_id: int, remote_port_name: str,
-                     force: bool = False) -> dict:
+                     force: bool = False, custom_port_name: str = None) -> dict:
     """同步对端端口的 remote_device / remote_port / status 三个字段。
+
+    custom_port_name 不为空时：
+      - 若对端设备已有同名端口 → 走场景二（UPDATE 关联）
+      - 若无同名端口 → 走场景一（INSERT 新端口，端口号从1自增避让）
+    custom_port_name 为空时：按 remote_port_name 匹配已有端口（原有逻辑）。
 
     返回 {"action": "synced"|"created"|"conflict", "detail": ...}
     conflict 时 detail 包含远程端口当前状态，供前端提示用户。
@@ -45,12 +50,13 @@ def sync_remote_port(conn, local_asset_id: int, local_port_num: int,
     ).fetchone()
     local_port_name = (local_port["name"] if local_port else None) or ("#" + str(local_port_num))
 
+    remote_device_label = local_asset["name"] or local_asset["asset_no"]
+    effective_name = custom_port_name if custom_port_name else remote_port_name
+
     remote_port = conn.execute(
         "SELECT * FROM ports WHERE asset_id=? AND name=?",
-        (remote_asset_id, remote_port_name)
+        (remote_asset_id, effective_name)
     ).fetchone()
-
-    remote_device_label = local_asset["name"] or local_asset["asset_no"]
 
     if remote_port:
         cur_remote_device = remote_port["remote_device"] or ""
@@ -65,17 +71,23 @@ def sync_remote_port(conn, local_asset_id: int, local_port_num: int,
                 },
             }
         conn.execute(
-            "UPDATE ports SET remote_device=?, remote_port=?, status='connected' WHERE id=?",
-            (remote_device_label, local_port_name, remote_port["id"]),
+            "UPDATE ports SET remote_device=?, remote_port=?, remote_asset_id=?, status='connected' WHERE id=?",
+            (remote_device_label, local_port_name, local_asset_id, remote_port["id"]),
         )
         return {"action": "synced"}
     else:
+        # 场景一：对端无同名端口，自动创建（端口号从1自增避让）
+        max_row = conn.execute(
+            "SELECT COALESCE(MAX(port_num),0) AS mx FROM ports WHERE asset_id=?",
+            (remote_asset_id,)
+        ).fetchone()
+        next_port_num = (max_row["mx"] if max_row else 0) + 1
         conn.execute(
-            """INSERT INTO ports (asset_id, port_num, name, speed, mac, ip, remote_device, remote_port, note, status)
-               VALUES (?, 1, ?, '', '', '', ?, ?, '', 'connected')""",
-            (remote_asset_id, remote_port_name, remote_device_label, local_port_name),
+            """INSERT INTO ports (asset_id, port_num, name, speed, mac, ip, remote_device, remote_port, remote_asset_id, note, status)
+               VALUES (?, ?, ?, '', '', '', ?, ?, ?, '', 'connected')""",
+            (remote_asset_id, next_port_num, effective_name, remote_device_label, local_port_name, local_asset_id),
         )
-        return {"action": "created"}
+        return {"action": "created", "detail": {"port_num": next_port_num, "name": effective_name}}
 
 
 def _replace_ports(conn, asset_id: int, ports: List[dict], is_network_device=None):
@@ -97,10 +109,11 @@ def _replace_ports(conn, asset_id: int, ports: List[dict], is_network_device=Non
         if num <= 0:
             continue
         conn.execute(
-            """INSERT INTO ports (asset_id, port_num, name, speed, mac, ip, remote_device, remote_port, note, status)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO ports (asset_id, port_num, name, speed, mac, ip, remote_device, remote_port, remote_asset_id, note, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (asset_id, num, p.get("name"), p.get("speed"), p.get("mac"), p.get("ip"),
-             p.get("remote_device"), p.get("remote_port"), p.get("note"), p.get("status", "disconnected")),
+             p.get("remote_device"), p.get("remote_port"), p.get("remote_asset_id"),
+             p.get("note"), p.get("status", "disconnected")),
         )
     # 有端口即视为网络设备；无端口时按调用方声明处理（见函数注释），
     # 避免「导入时已标记为网络设备但尚未录入端口」的设备被误清零。

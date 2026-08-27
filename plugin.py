@@ -57,7 +57,7 @@ class CMDBPlugin(BasePlugin):
             "name": "cmdb",
             # IT 资产详情-系统信息取消「密码」模块（移除显示密码按钮与密码列，
             # 密码已加密存储且不再展示，防敏感信息泄漏）
-            "version": "20260827-V1",
+            "version": "20260827-V2",
             "description": "资产配置管理（CMDB）：资产台账、机柜 U 位、维保与报表",
             "author": "NetCore Team",
         }
@@ -210,7 +210,9 @@ class CMDBPlugin(BasePlugin):
             """同步对端端口的 remote_device / remote_port / status 字段。
 
             请求体：{"local_asset_id": int, "local_port_num": int,
-                      "remote_asset_id": int, "remote_port_name": str}
+                      "remote_asset_id": int, "remote_port_name": str,
+                      "custom_port_name": str|None, "force": bool}
+            custom_port_name 非空时：对端无同名端口则自动创建（端口号自增避让）。
             返回：{"action": "synced"|"created"|"conflict", ...}
             conflict 时前端弹窗让用户确认覆盖或取消。
             """
@@ -219,12 +221,14 @@ class CMDBPlugin(BasePlugin):
             remote_asset_id = req.get("remote_asset_id")
             remote_port_name = req.get("remote_port_name")
             force = bool(req.get("force", False))
+            custom_port_name = req.get("custom_port_name") or None
             if not all([local_asset_id, local_port_num, remote_asset_id, remote_port_name]):
                 return JSONResponse(status_code=400, content={"success": False, "detail": "参数不完整"})
             conn = common._connect()
             try:
                 result = ports.sync_remote_port(conn, local_asset_id, local_port_num,
-                                                remote_asset_id, remote_port_name, force=force)
+                                                remote_asset_id, remote_port_name, force=force,
+                                                custom_port_name=custom_port_name)
                 conn.commit()
             except Exception as e:
                 conn.rollback()
@@ -233,7 +237,7 @@ class CMDBPlugin(BasePlugin):
                 conn.close()
             if result.get("action") == "conflict":
                 return {"action": "conflict", "detail": result["detail"]}
-            return {"action": result.get("action", "synced")}
+            return {"action": result.get("action", "synced"), "detail": result.get("detail")}
 
         # ---------------- 机柜 ----------------
         @router.get("/racks")
@@ -337,9 +341,9 @@ class CMDBPlugin(BasePlugin):
                 title = "维保到期预警报表"
             else:
                 rows = reports.report_inventory()
-                headers = ["资产编号", "名称", "分类", "子类", "使用人", "部门", "位置", "状态", "原值(¥)", "保修到期"]
-                data = [[r["asset_no"], r["name"], r["category"], r["subtype"], r["user"],
-                         r["dept"], r["location"], r["status"], r["price"], r["warranty_expire"]] for r in rows]
+                headers = ["资产编号", "名称", "分类", "子类", "品牌", "使用人", "部门", "位置", "状态", "颜色", "原值(¥)", "保修到期"]
+                data = [[r["asset_no"], r["name"], r["category"], r["subtype"], r.get("brand", ""), r["user"],
+                         r["dept"], r["location"], r["status"], r.get("color", ""), r["price"], r["warranty_expire"]] for r in rows]
                 title = "资产盘点报表"
             if format == "csv":
                 # 审查报告 问题3：CSV 公式注入消毒
