@@ -57,7 +57,7 @@ class CMDBPlugin(BasePlugin):
             "name": "cmdb",
             # IT 资产详情-系统信息取消「密码」模块（移除显示密码按钮与密码列，
             # 密码已加密存储且不再展示，防敏感信息泄漏）
-            "version": "20260826-V5",
+            "version": "20260827-V1",
             "description": "资产配置管理（CMDB）：资产台账、机柜 U 位、维保与报表",
             "author": "NetCore Team",
         }
@@ -204,6 +204,36 @@ class CMDBPlugin(BasePlugin):
                 return JSONResponse(status_code=400, content={"success": False, "detail": str(e)})
             audit_log("cmdb_port_update", "更新端口配置 资产ID=%d" % asset_id, "success", username=user)
             return {"success": True}
+
+        @router.post("/ports/sync-remote")
+        async def sync_remote_port(req: dict, user: str = Depends(get_current_user)):
+            """同步对端端口的 remote_device / remote_port / status 字段。
+
+            请求体：{"local_asset_id": int, "local_port_num": int,
+                      "remote_asset_id": int, "remote_port_name": str}
+            返回：{"action": "synced"|"created"|"conflict", ...}
+            conflict 时前端弹窗让用户确认覆盖或取消。
+            """
+            local_asset_id = req.get("local_asset_id")
+            local_port_num = req.get("local_port_num")
+            remote_asset_id = req.get("remote_asset_id")
+            remote_port_name = req.get("remote_port_name")
+            force = bool(req.get("force", False))
+            if not all([local_asset_id, local_port_num, remote_asset_id, remote_port_name]):
+                return JSONResponse(status_code=400, content={"success": False, "detail": "参数不完整"})
+            conn = common._connect()
+            try:
+                result = ports.sync_remote_port(conn, local_asset_id, local_port_num,
+                                                remote_asset_id, remote_port_name, force=force)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                return JSONResponse(status_code=400, content={"success": False, "detail": str(e)})
+            finally:
+                conn.close()
+            if result.get("action") == "conflict":
+                return {"action": "conflict", "detail": result["detail"]}
+            return {"action": result.get("action", "synced")}
 
         # ---------------- 机柜 ----------------
         @router.get("/racks")
@@ -387,8 +417,10 @@ class CMDBPlugin(BasePlugin):
             "icon": "doc",
             "children": [
                 {"id": "cmdb_dashboard", "label": "资产仪表盘", "icon": "dashboard", "path": "/cmdb/dashboard"},
-                {"id": "cmdb_it", "label": "IT 资产", "icon": "guardian", "path": "/cmdb/it-assets"},
-                {"id": "cmdb_physical", "label": "办公/实物资产", "icon": "doc", "path": "/cmdb/physical"},
+                {"id": "cmdb_it_assets", "label": "IT 资产", "icon": "guardian", "path": "/cmdb/it-assets"},
+                {"id": "cmdb_it_racks", "label": "IT 机柜视图", "icon": "guardian", "path": "/cmdb/it-racks"},
+                {"id": "cmdb_office", "label": "办公家具", "icon": "doc", "path": "/cmdb/office"},
+                {"id": "cmdb_production", "label": "生产设备", "icon": "doc", "path": "/cmdb/production"},
                 {"id": "cmdb_maintenance", "label": "维保管理", "icon": "setting", "path": "/cmdb/maintenance"},
                 {"id": "cmdb_reports", "label": "报表中心", "icon": "doc", "path": "/cmdb/reports"},
             ],

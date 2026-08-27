@@ -27,6 +27,57 @@ def get_ports(asset_id: int) -> List[dict]:
         conn.close()
 
 
+def sync_remote_port(conn, local_asset_id: int, local_port_num: int,
+                     remote_asset_id: int, remote_port_name: str,
+                     force: bool = False) -> dict:
+    """同步对端端口的 remote_device / remote_port / status 三个字段。
+
+    返回 {"action": "synced"|"created"|"conflict", "detail": ...}
+    conflict 时 detail 包含远程端口当前状态，供前端提示用户。
+    """
+    local_asset = conn.execute("SELECT name, asset_no FROM assets WHERE id=?", (local_asset_id,)).fetchone()
+    if not local_asset:
+        return {"action": "error", "detail": "本端资产不存在"}
+
+    local_port = conn.execute(
+        "SELECT name FROM ports WHERE asset_id=? AND port_num=?",
+        (local_asset_id, local_port_num)
+    ).fetchone()
+    local_port_name = (local_port["name"] if local_port else None) or ("#" + str(local_port_num))
+
+    remote_port = conn.execute(
+        "SELECT * FROM ports WHERE asset_id=? AND name=?",
+        (remote_asset_id, remote_port_name)
+    ).fetchone()
+
+    remote_device_label = local_asset["name"] or local_asset["asset_no"]
+
+    if remote_port:
+        cur_remote_device = remote_port["remote_device"] or ""
+        cur_remote_port = remote_port["remote_port"] or ""
+        if not force and cur_remote_device and cur_remote_device != remote_device_label:
+            return {
+                "action": "conflict",
+                "detail": {
+                    "remote_device": cur_remote_device,
+                    "remote_port": cur_remote_port,
+                    "status": remote_port["status"],
+                },
+            }
+        conn.execute(
+            "UPDATE ports SET remote_device=?, remote_port=?, status='connected' WHERE id=?",
+            (remote_device_label, local_port_name, remote_port["id"]),
+        )
+        return {"action": "synced"}
+    else:
+        conn.execute(
+            """INSERT INTO ports (asset_id, port_num, name, speed, mac, ip, remote_device, remote_port, note, status)
+               VALUES (?, 1, ?, '', '', '', ?, ?, '', 'connected')""",
+            (remote_asset_id, remote_port_name, remote_device_label, local_port_name),
+        )
+        return {"action": "created"}
+
+
 def _replace_ports(conn, asset_id: int, ports: List[dict], is_network_device=None):
     """整表替换某资产的端口。
 

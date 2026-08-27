@@ -1,10 +1,10 @@
-/* CMDB - 办公/实物资产（机柜视图已迁移至 IT 资产页面） */
+/* CMDB - 生产设备资产 */
 (function () {
-    window.NC.registerPage('cmdb_physical', {
+    window.NC.registerPage('cmdb_production', {
         mixins: [window.NC.SF_MIXIN],
         template: `
         <div class="cmdb-page">
-          <CmdbPageHeader title="办公 / 实物资产" subtitle="办公家具 / 生产设备台账">
+          <CmdbPageHeader title="生产设备" subtitle="机床 / 生产线 / 检测设备台账">
             <el-button size="small" @click="downloadCsvTemplate">下载导入模板</el-button>
             <el-upload :auto-upload="false" :on-change="onCsvFile" :show-file-list="false" accept=".csv" style="display:inline-block;">
               <el-button size="small" :loading="csvImporting">CSV 导入</el-button>
@@ -15,36 +15,33 @@
             </el-upload>
             <el-button type="primary" @click="openNew">新建资产</el-button>
           </CmdbPageHeader>
-          <el-card>
-            <el-form :inline="true" size="small" style="margin-bottom:8px;">
-              <el-form-item label="搜索"><el-input v-model="search" placeholder="名称/编号/使用人" clearable @keyup.enter="onSearch" @clear="onSearch" style="width:240px;"></el-input></el-form-item>
-              <el-form-item><el-button type="primary" @click="onSearch">查询</el-button></el-form-item>
-              <el-form-item>
-                <el-button type="warning" :disabled="!selected.length" @click="openBatchInventory">
-                  批量更新盘点时间<span v-if="selected.length"> ({{selected.length}})</span>
-                </el-button>
-              </el-form-item>
-              <el-form-item>
-                <el-button type="danger" :disabled="!selected.length" @click="batchDelete">
-                  批量删除<span v-if="selected.length"> ({{selected.length}})</span>
-                </el-button>
-              </el-form-item>
-            </el-form>
-            <nc-table ref="table" :data="searched" :columns="cols" client-paged selectable row-key="id"
-                      :page="page" :page-size="size" :page-sizes="[5,10,20,50]" size="small"
-                      @selection-change="onSelect" @page-change="onPage" @size-change="onSize">
-              <template #col-name="{row}"><b>{{row.name}}</b></template>
-              <template #col-category="{row}"><el-tag size="small" type="info">{{row.category}}</el-tag></template>
-              <template #col-subtype="{row}"><el-tag size="small">{{row.subtype||'-'}}</el-tag></template>
-              <template #col-status="{row}"><el-tag size="small" :type="row.status==='使用中'||row.status==='运行中'?'success':row.status==='维修中'?'warning':'info'">{{row.status}}</el-tag></template>
-              <template #col-warranty_expire="{row}"><el-tag size="small" :type="warrantyType(row)">{{warrantyText(row)}}</el-tag></template>
-              <template #col-ops="{row}">
-                  <el-button size="small" text type="primary" @click.stop="openDetail(row)">详情</el-button>
-                  <el-button size="small" text type="primary" @click.stop="openEdit(row)">编辑</el-button>
-                  <el-button size="small" text type="danger" @click.stop="doDelete(row)">删除</el-button>
-              </template>
-            </nc-table>
-          </el-card>
+          <el-form :inline="true" size="small" style="margin-bottom:8px;">
+            <el-form-item label="搜索"><el-input v-model="search" placeholder="名称/编号/使用人" clearable @keyup.enter="onSearch" @clear="onSearch" style="width:240px;"></el-input></el-form-item>
+            <el-form-item><el-button type="primary" @click="onSearch">查询</el-button></el-form-item>
+            <el-form-item>
+              <el-button type="warning" :disabled="!selected.length" @click="openBatchInventory">
+                批量更新盘点时间<span v-if="selected.length"> ({{selected.length}})</span>
+              </el-button>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="danger" :disabled="!selected.length" @click="batchDelete">
+                批量删除<span v-if="selected.length"> ({{selected.length}})</span>
+              </el-button>
+            </el-form-item>
+          </el-form>
+          <nc-table ref="table" :data="searched" :columns="cols" client-paged selectable row-key="id"
+                    :page="page" :page-size="size" :page-sizes="[5,10,20,50]" size="small"
+                    @selection-change="onSelect" @page-change="onPage" @size-change="onSize">
+            <template #col-name="{row}"><b>{{row.name}}</b></template>
+            <template #col-subtype="{row}"><el-tag size="small">{{row.subtype||'-'}}</el-tag></template>
+            <template #col-status="{row}"><el-tag size="small" :type="row.status==='使用中'||row.status==='运行中'?'success':row.status==='维修中'?'warning':'info'">{{row.status}}</el-tag></template>
+            <template #col-warranty_expire="{row}"><el-tag size="small" :type="warrantyType(row)">{{warrantyText(row)}}</el-tag></template>
+            <template #col-ops="{row}">
+                <el-button size="small" text type="primary" @click.stop="openDetail(row)">详情</el-button>
+                <el-button size="small" text type="primary" @click.stop="openEdit(row)">编辑</el-button>
+                <el-button size="small" text type="danger" @click.stop="doDelete(row)">删除</el-button>
+            </template>
+          </nc-table>
           <CmdbAssetForm ref="formDlg" @saved="load"/>
           <CmdbAssetDetail ref="detailDlg" @changed="load" @edit="openEdit"/>
           <el-dialog v-model="batchVisible" title="批量更新盘点时间" width="420px" :close-on-click-modal="false">
@@ -64,21 +61,18 @@
             searched() {
                 const q = (this.search || '').trim().toLowerCase();
                 if (!q) return this.allRows;
-                return this.allRows.filter(r => {
-                    return [r.name, r.asset_no, r.user].some(v => v && String(v).toLowerCase().indexOf(q) !== -1);
-                });
+                return this.allRows.filter(r => [r.name, r.asset_no, r.user].some(v => v && String(v).toLowerCase().indexOf(q) !== -1));
             },
             cols() {
                 return [
                     { label: '资产编号', prop: 'asset_no', width: 140, sortable: true, filterable: true },
                     { label: '名称', prop: 'name', minWidth: 150, sortable: true, filterable: true, slotName: 'col-name' },
-                    { label: '分类', prop: 'category', width: 100, sortable: true, filterable: true, slotName: 'col-category' },
                     { label: '子类', prop: 'subtype', width: 110, sortable: true, filterable: true, slotName: 'col-subtype' },
                     { label: '使用人', prop: 'user', width: 90, sortable: true, filterable: true },
                     { label: '位置', prop: 'location', minWidth: 120, sortable: true, filterable: true },
                     { label: '状态', prop: 'status', width: 90, sortable: true, filterable: true, slotName: 'col-status' },
                     { label: '维保', prop: 'warranty_expire', width: 120, sortable: true, filterable: true, slotName: 'col-warranty_expire' },
-                    { label: '盘点时间', prop: 'inventory_time', width: 120, sortable: true, filterable: true, slotName: 'col-inventory_time' },
+                    { label: '盘点时间', prop: 'inventory_time', width: 120, sortable: true, filterable: true },
                     { label: '操作', width: 200, slotName: 'col-ops' },
                 ];
             },
@@ -155,12 +149,10 @@
             daysLeft(row) { if (!row.warranty_expire) return null; const t = new Date(); t.setHours(0,0,0,0); const e = new Date(row.warranty_expire); e.setHours(0,0,0,0); return Math.round((e - t) / 86400000); },
             warrantyType(row) { const d = this.daysLeft(row); if (d === null) return 'info'; return d < 0 ? 'danger' : d <= 30 ? 'warning' : 'success'; },
             warrantyText(row) { const d = this.daysLeft(row); if (d === null) return '无维保'; return d < 0 ? '已过保'+(-d)+'天' : '剩余'+d+'天'; },
-            // 全量拉前端：后端单页上限 200（size>200 返回 422），
-            // 按 total 循环分页取完再合并（上限 1 万条，与旧版一致），客户端筛选/排序/分页
             async load() {
                 try {
                     const PAGE_SIZE = 200, MAX_ROWS = 10000;
-                    const baseParams = { size: PAGE_SIZE, exclude_category: 'IT设备' };
+                    const baseParams = { size: PAGE_SIZE, category: '生产设备' };
                     const first = await http.get('/api/cmdb/assets', { params: Object.assign({ page: 1 }, baseParams) });
                     const rows = first.data.assets || [];
                     const pages = Math.ceil(Math.min(first.data.total || 0, MAX_ROWS) / PAGE_SIZE);
@@ -224,11 +216,11 @@
                     }
                 }).catch(() => {});
             },
-            openNew() { this.$refs.formDlg.open(null, { categories: ['办公家具', '生产设备'], defaultCategory: '办公家具' }); },
-            openEdit(row) { this.$refs.formDlg.open(row, { categories: ['办公家具', '生产设备'] }); },
+            openNew() { this.$refs.formDlg.open(null, { categories: ['生产设备'], defaultCategory: '生产设备' }); },
+            openEdit(row) { this.$refs.formDlg.open(row, { categories: ['生产设备'] }); },
             openDetail(row) { this.$refs.detailDlg.open(row); },
             doDelete(row) { this.$confirm('确定删除资产 ' + row.asset_no + '？', '提示', { type: 'warning' }).then(async () => { await http.delete('/api/cmdb/assets/' + row.id); this.$message.success('已删除'); this.load(); }).catch(() => {}); },
         },
         mounted() { this.load(); },
-    }, '办公/实物资产');
+    }, '生产设备', '/cmdb/production');
 })();

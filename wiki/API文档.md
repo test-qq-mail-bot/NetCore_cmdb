@@ -329,6 +329,58 @@ CSV 批量导入资产。
 
 ---
 
+### POST `/api/cmdb/ports/sync-remote`
+
+同步对端端口的 remote_device / remote_port / status 三个字段（端口双向联动）。
+
+**请求体**
+
+```json
+{
+  "local_asset_id": 1,
+  "local_port_num": 1,
+  "remote_asset_id": 2,
+  "remote_port_name": "eth0",
+  "force": false
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| local_asset_id | int | 是 | 本端资产 ID |
+| local_port_num | int | 是 | 本端端口号 |
+| remote_asset_id | int | 是 | 对端资产 ID |
+| remote_port_name | string | 是 | 对端端口名称 |
+| force | bool | 否 | 冲突时是否强制覆盖（默认 false） |
+
+**响应**
+
+```json
+// 成功同步
+{ "action": "synced" }
+
+// 对端端口不存在，自动创建
+{ "action": "created" }
+
+// 冲突（对端端口已连接到其他设备）
+{
+  "action": "conflict",
+  "detail": {
+    "remote_device": "其他设备",
+    "remote_port": "Eth1/1",
+    "status": "connected"
+  }
+}
+```
+
+**业务规则**
+- 同步仅更新对端端口的 `remote_device`、`remote_port`、`status` 三个字段。
+- 对端端口不存在时自动创建（port_num=1，status=connected）。
+- 冲突检测：对端端口已有不同的 remote_device 时返回 conflict，前端弹窗让用户确认覆盖或取消。
+- `force=true` 时跳过冲突检测，直接覆盖。
+
+---
+
 ## 机柜管理
 
 ### GET `/api/cmdb/racks`
