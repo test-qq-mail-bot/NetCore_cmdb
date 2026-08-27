@@ -115,11 +115,11 @@ def create_asset(data: dict) -> int:
         _validate_u_position(conn, data.get("rack_id"), data.get("u_start"), data.get("u_height"))
         asset_no = data.get("asset_no")
         if not asset_no:
-            # 自动生成资产编号：极小概率与既有编号冲突（UNIQUE 约束），最多重试 5 次
+            # 自动生成资产编号（前缀-当日日期-2位序号，顺序分配保证唯一）
             cur = None
             for _ in range(5):
                 try:
-                    asset_no = common._gen_asset_no(data.get("category", "IT设备"))
+                    asset_no = common._gen_asset_no(data.get("category", "IT设备"), conn=conn)
                     cur = conn.execute(
                         """INSERT INTO assets
                            (asset_no, name, category, subtype, user, dept, location, status,
@@ -152,7 +152,12 @@ def create_asset(data: dict) -> int:
             if cur is None:
                 raise ValueError("资产编号自动生成连续冲突，请手动指定 asset_no")
         else:
-            cur = _insert_with_asset_no(conn, data, asset_no, is_net)
+            # 手填编号：先格式校验（前缀-年月日-2位序号），再唯一性预检，违规禁止保存
+            ano = common.validate_asset_no(asset_no)
+            dup = conn.execute("SELECT id FROM assets WHERE asset_no=?", (ano,)).fetchone()
+            if dup:
+                raise ValueError("资产编号「%s」已存在，请更换编号" % ano)
+            cur = _insert_with_asset_no(conn, data, ano, is_net)
         conn.commit()
         aid = cur.lastrowid
         # 显式声明为网络设备时即使暂无端口也保留标记（否则端口区永远不显示）
@@ -265,12 +270,13 @@ def update_asset(asset_id: int, data: dict) -> bool:
             return False
         if "name" in data and not (str(data["name"]).strip() if data["name"] is not None else ""):
             raise ValueError("资产名称(name)不能为空")
-        # 资产编号可修改：非空校验 + UNIQUE 冲突检测（禁止保存为已存在的编号）
+        # 资产编号可修改：非空校验 + 格式规则校验 + UNIQUE 冲突检测（禁止保存为已存在的编号）
         if "asset_no" in data:
             ano = data["asset_no"]
             ano = str(ano).strip() if ano is not None else ""
             if not ano:
                 raise ValueError("资产编号(asset_no)不能为空")
+            ano = common.validate_asset_no(ano)
             dup = conn.execute(
                 "SELECT id FROM assets WHERE asset_no=? AND id<>?", (ano, asset_id)
             ).fetchone()

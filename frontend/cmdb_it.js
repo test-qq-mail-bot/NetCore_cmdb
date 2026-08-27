@@ -35,7 +35,6 @@
                         :page="page" :page-size="size" :page-sizes="[5,10,20,50]" size="small"
                         @selection-change="onSelect" @page-change="onPage" @size-change="onSize">
                 <template #col-name="{row}"><b>{{row.name}}</b></template>
-                <template #col-category="{row}"><el-tag size="small" type="info">{{row.category}}</el-tag></template>
                 <template #col-subtype="{row}"><el-tag size="small">{{row.subtype||'-'}}</el-tag></template>
                 <template #col-status="{row}"><el-tag size="small" :type="row.status==='使用中'||row.status==='运行中'?'success':row.status==='维修中'?'warning':'info'">{{row.status}}</el-tag></template>
                 <template #col-warranty_expire="{row}"><el-tag size="small" :type="warrantyType(row)">{{warrantyText(row)}}</el-tag></template>
@@ -157,7 +156,6 @@
                 return [
                     { label: '资产编号', prop: 'asset_no', width: 140, sortable: true, filterable: true },
                     { label: '名称', prop: 'name', minWidth: 150, sortable: true, filterable: true, slotName: 'col-name' },
-                    { label: '分类', prop: 'category', width: 100, sortable: true, filterable: true, slotName: 'col-category' },
                     { label: '子类', prop: 'subtype', width: 110, sortable: true, filterable: true, slotName: 'col-subtype' },
                     { label: '品牌', prop: 'brand', width: 100, sortable: true, filterable: true },
                     { label: '颜色', prop: 'color', width: 90, sortable: true, filterable: true },

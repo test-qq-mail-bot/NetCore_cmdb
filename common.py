@@ -12,7 +12,7 @@ reports/backup），本文件不实现具体业务 CRUD，仅提供基础设施�
 被多处复用的小工具。
 """
 import json
-import random
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -194,15 +194,55 @@ def _now() -> str:
     return utc_now_str()
 
 
-def _gen_asset_no(category: str) -> str:
-    """生成资产编号：「分类前缀-年份+5位随机数」，如 IT-202683471。
+def _gen_asset_no(category: str, conn: sqlite3.Connection = None) -> str:
+    """生成资产编号：「前缀-YYYYMMDD-NN」当日顺序分配，如 IT-20260826-00。
 
-    未知分类统一用 AS 前缀。随机数有极小概率与既有编号撞车（asset_no 有 UNIQUE
-    约束），由 modules.assets.create_asset 捕获后重试。
+    取库内当日同前缀已用最大序号 +1（序号 00 起）；当日该分类序号用尽
+    （超过 99）抛 ValueError，避免溢出破坏「2 位序号」格式。
+    conn 缺省时自建短连接查询（兼容旧调用），传入时复用外层事务连接。
     """
     prefix = CATEGORY_PREFIX.get(category, "AS")
-    year = datetime.now().year
-    return "%s-%s%s" % (prefix, year, str(random.randint(10000, 99999)))
+    day = datetime.now().strftime("%Y%m%d")
+    own_conn = conn is None
+    if own_conn:
+        conn = _connect()
+    try:
+        like = "%s-%s-%%" % (prefix, day)
+        max_seq = -1
+        for row in conn.execute("SELECT asset_no FROM assets WHERE asset_no LIKE ?", (like,)):
+            tail = str(row["asset_no"]).rsplit("-", 1)[-1]
+            if tail.isdigit():
+                max_seq = max(max_seq, int(tail))
+        if max_seq + 1 > 99:
+            raise ValueError("分类「%s」在 %s 当日的编号序号(00-99)已用尽，请手动指定编号" % (category, day))
+        return "%s-%s-%02d" % (prefix, day, max_seq + 1)
+    finally:
+        if own_conn:
+            conn.close()
+
+
+# 资产编号规则：前缀(IT/OF/PE/AS) + 8位真实日历日期 + 2位序号，如 IT-20260826-00
+_ASSET_NO_RE = re.compile(r"^(IT|OF|PE|AS)-(\d{8})-(\d{2})$")
+
+
+def validate_asset_no(asset_no) -> str:
+    """校验手填资产编号；不符合规则抛 ValueError（路由层翻译为 400 返回）。
+
+    规则：前缀 ∈ {IT,OF,PE,AS} - 8位真实日历日期 - 2位序号。
+    校验通过返回去除首尾空白后的编号。
+    """
+    ano = str(asset_no or "").strip()
+    m = _ASSET_NO_RE.match(ano)
+    if not m:
+        raise ValueError(
+            "资产编号「%s」不符合规则：应为 前缀-年月日-2位序号（如 IT-20260826-00），"
+            "前缀须为 IT/OF/PE/AS，日期 8 位、序号 2 位" % (ano or "空")
+        )
+    try:
+        datetime.strptime(m.group(2), "%Y%m%d")
+    except ValueError:
+        raise ValueError("资产编号「%s」中的日期 %s 不是有效日期" % (ano, m.group(2)))
+    return ano
 
 
 def _row_to_asset(conn, row) -> dict:
@@ -313,112 +353,120 @@ def seed_if_empty(force: bool = False):
                 "INSERT INTO racks (rack_id,name,location,total_u,status,contract_no,supplier,purchase_date,price,warranty_months,warranty_expire) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 rk,
             )
-        # —— 资产（机柜以外的）——
+        # —— 资产（机柜以外的；编号格式 前缀-采购日期-2位序号，13 条互不相同）——
+        # 覆盖设计：分类 3 种 / 状态 6 种全（使用中/维修中/在库/闲置/运行中/报废）/
+        # 机柜上架与散置并存 / 有无端口并存 / 系统信息有无并存 / 备注与盘点时间空实并存，
+        # 人工验收无需再逐项造数。
         assets = [
             # 1) IT-笔记本：常规办公资产，无端口/机柜，系统信息 1 条
-            ("IT-", "ThinkPad X1 Carbon", "IT设备", "笔记本", "张三", "研发部", "B栋302-01",
+            ("IT-20240115-00", "ThinkPad X1 Carbon", "IT设备", "笔记本", "张三", "研发部", "B栋302-01",
              "使用中", "联想", "X1 Carbon Gen12", "PF-3AB2C4D5", "黑色", "1TB SSD", "32GB",
              "HT-2024-0015", "联想官方旗舰店", "2024-01-15", 12800, 36, "2027-01-14",
              '{"system_info":[{"ip":"192.168.1.101","login_method":"SSH","port":22,"username":"zhangsan","note":"办公笔记本"}]}',
-             None, None, None, 0, "2026-06-30", []),
+             "研发主力开发机", None, None, None, 0, "2026-06-30", []),
             # 2) IT-服务器：机柜上架 + 2 端口 + 2 条系统信息
-            ("IT-", "Dell PowerEdge R750", "IT设备", "服务器", "管理员", "IT部", "A栋数据中心",
+            ("IT-20230601-01", "Dell PowerEdge R750", "IT设备", "服务器", "管理员", "IT部", "A栋数据中心",
              "使用中", "戴尔", "R750", "DL-8821XY", "银灰色", "4×1.92TB SSD", "256GB",
              "HT-2023-0088", "戴尔中国", "2023-06-01", 68500, 36, "2026-05-31",
              '{"system_info":[{"ip":"10.10.10.5","login_method":"SSH","port":22,"username":"root","note":"业务服务器"},{"ip":"10.10.10.6","login_method":"Web","port":443,"username":"admin","note":"带外管理"}]}',
-             "CAB-A02", 12, 2, 1, "2026-05-20", [
+             "核心业务服务器，变更前请报备", "CAB-A02", 12, 2, 1, "2026-05-20", [
                 {"port_num": 1, "name": "eth0", "speed": "100GbE", "mac": "D4:BE:D9:11:22:33", "ip": "10.10.10.5", "remote_device": "Cisco 93180", "remote_port": "Eth1/1", "note": "业务口", "status": "connected"},
                 {"port_num": 2, "name": "eth1", "speed": "100GbE", "mac": "D4:BE:D9:11:22:34", "ip": "10.10.10.6", "remote_device": "Cisco 93180", "remote_port": "Eth1/2", "note": "带外", "status": "connected"},
-            ]),
+             ]),
             # 3) IT-交换机（思科）：机柜 + 4 端口 + 系统信息
-            ("IT-", "Cisco Nexus 93180", "IT设备", "交换机", "网络管理员", "IT部", "A栋数据中心",
+            ("IT-20240301-02", "Cisco Nexus 93180", "IT设备", "交换机", "网络管理员", "IT部", "A栋数据中心",
              "使用中", "思科", "Nexus 93180YC-FX", "CS-7710AB", "黑色", "128GB SSD", "16GB",
              "HT-2024-0022", "思科金牌代理", "2024-03-01", 152000, 36, "2027-02-28",
              '{"system_info":[{"ip":"10.10.10.1","login_method":"Console","port":0,"username":"cisco","note":"核心交换机"}]}',
-             "CAB-A02", 24, 1, 1, "2026-04-15", [
+             "", "CAB-A02", 24, 1, 1, "2026-04-15", [
                 {"port_num": 1, "name": "Eth1/1", "speed": "100GbE", "mac": "00:1C:58:AA:BB:01", "ip": "", "remote_device": "Dell R750", "remote_port": "eth0", "note": "服务器", "status": "connected"},
                 {"port_num": 2, "name": "Eth1/2", "speed": "100GbE", "mac": "00:1C:58:AA:BB:02", "ip": "", "remote_device": "Dell R750", "remote_port": "eth1", "note": "带外", "status": "connected"},
                 {"port_num": 3, "name": "Eth1/3", "speed": "100GbE", "mac": "00:1C:58:AA:BB:03", "ip": "", "remote_device": "核心路由器", "remote_port": "GE0/0/0", "note": "上联", "status": "connected"},
                 {"port_num": 48, "name": "Eth1/48", "speed": "100GbE", "mac": "00:1C:58:AA:BB:30", "ip": "", "remote_device": "防火墙", "remote_port": "Port1", "note": "外网", "status": "connected"},
-            ]),
+             ]),
             # 4) IT-交换机（华三）：机柜 + 2 端口
-            ("IT-", "H3C S5130S", "IT设备", "交换机", "网络管理员", "IT部", "B栋弱电间",
+            ("IT-20240415-03", "H3C S5130S", "IT设备", "交换机", "网络管理员", "IT部", "B栋弱电间",
              "使用中", "新华三", "S5130S-28P-EI", "H3-5520XX", "灰色", "32GB SSD", "8GB",
              "HT-2024-0030", "H3C授权经销商", "2024-04-15", 8900, 36, "2027-04-14",
              '{"system_info":[{"ip":"192.168.10.1","login_method":"Telnet","port":23,"username":"admin","note":"楼层接入"}]}',
-             "CAB-B05", 10, 1, 1, "2026-03-01", [
+             "", "CAB-B05", 10, 1, 1, "2026-03-01", [
                 {"port_num": 1, "name": "G1/0/1", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:01", "ip": "", "remote_device": "AP-01", "remote_port": "Lan1", "note": "无线", "status": "connected"},
                 {"port_num": 24, "name": "G1/0/24", "speed": "1GbE", "mac": "2C:23:3A:CC:DD:18", "ip": "", "remote_device": "打印机", "remote_port": "LAN", "note": "办公", "status": "disconnected"},
-            ]),
+             ]),
             # 5) IT-路由器（华为）：机柜 + 2 端口
-            ("IT-", "Huawei AR6140", "IT设备", "路由器", "网络管理员", "IT部", "A栋数据中心",
+            ("IT-20240520-04", "Huawei AR6140", "IT设备", "路由器", "网络管理员", "IT部", "A栋数据中心",
              "使用中", "华为", "AR6140-9G-2AC", "HW-6140XY", "深灰色", "16GB Flash", "4GB",
              "HT-2024-0035", "华为企业网络", "2024-05-20", 24500, 24, "2026-05-19",
              '{"system_info":[{"ip":"10.0.0.1","login_method":"SSH","port":22,"username":"huawei","note":"出口路由"}]}',
-             "CAB-A01", 5, 1, 1, "2026-02-28", [
+             "", "CAB-A01", 5, 1, 1, "2026-02-28", [
                 {"port_num": 1, "name": "GE0/0/0", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:01", "ip": "10.0.0.1", "remote_device": "交换机", "remote_port": "Eth1/3", "note": "LAN", "status": "connected"},
                 {"port_num": 2, "name": "GE0/0/1", "speed": "1GbE", "mac": "4C:1F:CC:EE:FF:02", "ip": "", "remote_device": "防火墙", "remote_port": "Port2", "note": "WAN", "status": "connected"},
-            ]),
+             ]),
             # 6) IT-防火墙（深信服）：机柜 + 2 端口
-            ("IT-", "Sangfor AF-1000", "IT设备", "防火墙", "安全管理员", "安全部", "A栋数据中心",
+            ("IT-20231210-05", "Sangfor AF-1000", "IT设备", "防火墙", "安全管理员", "安全部", "A栋数据中心",
              "使用中", "深信服", "AF-1000-L1600", "SF-1000XY", "黑色", "240GB SSD", "8GB",
              "HT-2023-0150", "深信服科技", "2023-12-10", 58000, 12, "2024-12-09",
              '{"system_info":[{"ip":"10.0.0.254","login_method":"Web","port":443,"username":"admin","note":"边界防火墙"}]}',
-             "CAB-A01", 8, 1, 1, "2026-01-15", [
+             "", "CAB-A01", 8, 1, 1, "2026-01-15", [
                 {"port_num": 1, "name": "Port1", "speed": "1GbE", "mac": "00:0C:29:AB:CD:01", "ip": "", "remote_device": "路由器", "remote_port": "GE0/0/1", "note": "外网口", "status": "connected"},
                 {"port_num": 2, "name": "Port2", "speed": "1GbE", "mac": "00:0C:29:AB:CD:02", "ip": "", "remote_device": "交换机", "remote_port": "Eth1/48", "note": "内网口", "status": "connected"},
-            ]),
+             ]),
             # 7) IT-无线AP（安移通）：1 端口 + 系统信息
-            ("IT-", "Aruba AP-535", "IT设备", "AP", "无线网络", "IT部", "B栋走廊",
+            ("IT-20240601-06", "Aruba AP-535", "IT设备", "AP", "无线网络", "IT部", "B栋走廊",
              "使用中", "安移通", "AP-535", "AR-535XY", "白色", "8GB eMMC", "4GB",
              "HT-2024-0040", "Aruba代理商", "2024-06-01", 3200, 12, "2025-05-31",
              '{"system_info":[{"ip":"192.168.20.5","login_method":"Web","port":8443,"username":"aruba","note":"无线接入点"}]}',
-             None, None, None, 1, "2026-06-01", [
+             "", None, None, None, 1, "2026-06-01", [
                 {"port_num": 1, "name": "Eth0", "speed": "2.5GbE", "mac": "70:4F:57:12:34:56", "ip": "192.168.20.5", "remote_device": "交换机", "remote_port": "G1/0/1", "note": "POE供电", "status": "connected"},
-            ]),
+             ]),
             # 8) IT-手机：维修中状态
-            ("IT-", "iPhone 14 测试机", "IT设备", "手机", "孙七", "测试部", "B栋405",
+            ("IT-20230901-07", "iPhone 14 测试机", "IT设备", "手机", "孙七", "测试部", "B栋405",
              "维修中", "苹果", "iPhone 14", "IP-14XY", "蓝色", "128GB", "6GB",
              "HT-2023-0005", "Apple Store", "2023-09-01", 6999, 12, "2024-08-31",
-             '{}', None, None, None, 0, "2025-12-20", []),
+             '{}', "屏幕损坏送修中", None, None, None, 0, "2025-12-20", []),
             # 9) IT-台式机：在库状态
-            ("IT-", "HP EliteDesk 800", "IT设备", "台式机", "", "行政部", "C栋仓库",
+            ("IT-20240701-08", "HP EliteDesk 800", "IT设备", "台式机", "", "行政部", "C栋仓库",
              "在库", "惠普", "EliteDesk 800 G9", "HP-800XY", "黑色", "512GB SSD", "16GB",
              "HT-2024-0050", "惠普授权经销商", "2024-07-01", 5600, 36, "2027-06-30",
              '{"system_info":[{"ip":"","login_method":"SSH","port":22,"username":"admin","note":"备用机"}]}',
-             None, None, None, 0, "", []),
-            # 10) 办公家具-工位桌：闲置状态
-            ("OF-", "员工工位桌", "办公家具", "工位桌", "李四", "市场部", "A栋201",
+             "", None, None, None, 0, "", []),
+            # 10) IT-旧笔记本：报废状态（覆盖「报废」选项）
+            ("IT-20191015-09", "ThinkPad T480 旧笔记本", "IT设备", "笔记本", "", "行政部", "C栋仓库",
+             "报废", "联想", "ThinkPad T480", "PF-1A2B3C4D", "黑色", "256GB SSD", "8GB",
+             "HT-2019-0102", "联想官方旗舰店", "2019-10-15", 9500, 36, "2022-10-14",
+             '{}', "已过保且主板故障，待资产处置流程处理", None, None, None, 0, "2025-12-31", []),
+            # 11) 办公家具-工位桌：闲置状态
+            ("OF-20231120-00", "员工工位桌", "办公家具", "工位桌", "李四", "市场部", "A栋201",
              "闲置", "震旦", "工位桌 1400×600", "OF-042XY", "原木色", "", "",
              "HT-2023-0100", "震旦家具", "2023-11-20", 1850, 60, "2028-11-19",
-             '{}', None, None, None, 0, "", []),
-            # 11) 办公家具-高管办公椅：使用中
-            ("OF-", "高管办公椅", "办公家具", "办公椅", "王五", "总经办", "C栋501",
+             '{}', "闲置中可调配", None, None, None, 0, "", []),
+            # 12) 办公家具-高管办公椅：使用中
+            ("OF-20240210-01", "高管办公椅", "办公家具", "办公椅", "王五", "总经办", "C栋501",
              "使用中", "冈村", "Contessa", "OF-088XY", "黑色", "", "",
              "HT-2024-0008", "冈村中国", "2024-02-10", 4200, 60, "2029-02-09",
-             '{}', None, None, None, 0, "2026-04-10", []),
-            # 12) 生产设备-CNC：运行中状态
-            ("PE-", "CNC加工中心", "生产设备", "机床", "赵六", "生产部", "1号厂房A区",
+             '{}', "", None, None, None, 0, "2026-04-10", []),
+            # 13) 生产设备-CNC：运行中状态
+            ("PE-20220512-00", "CNC加工中心", "生产设备", "机床", "赵六", "生产部", "1号厂房A区",
              "运行中", "沈阳机床", "VMC-850", "CNC-056XY", "蓝色", "", "",
              "HT-2022-0030", "沈阳机床集团", "2022-05-12", 285000, 36, "2025-05-11",
-             '{}', None, None, None, 0, "2026-03-25", []),
+             '{}', "", None, None, None, 0, "2026-03-25", []),
         ]
         for a in assets:
             (asset_no, name, category, subtype, user, dept, location, status, brand, model,
              sn, color, storage, memory, contract_no, supplier, purchase_date, price,
-             warranty_months, warranty_expire, config_json, rack_id, u_start, u_height,
+             warranty_months, warranty_expire, config_json, note, rack_id, u_start, u_height,
              is_net, inventory_time, ports) = a
             from plugins.NetCore_cmdb.modules import ports as _ports
             cur = conn.execute(
                 """INSERT INTO assets
                    (asset_no,name,category,subtype,user,dept,location,status,brand,model,sn,
                     color,storage,memory,contract_no,supplier,purchase_date,price,
-                    warranty_months,warranty_expire,config,rack_id,u_start,u_height,
+                    warranty_months,warranty_expire,note,config,rack_id,u_start,u_height,
                     is_network_device,inventory_time)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (asset_no, name, category, subtype, user, dept, location, status, brand, model, sn,
                  color, storage, memory, contract_no, supplier, purchase_date, price,
-                 warranty_months, warranty_expire, config_json, rack_id, u_start, u_height,
+                 warranty_months, warranty_expire, note, config_json, rack_id, u_start, u_height,
                  is_net, inventory_time),
             )
             aid = cur.lastrowid
@@ -483,5 +531,5 @@ def restore_demo_data() -> dict:
         conn.close()
     ok = seed_if_empty(force=True)
     if ok:
-        return {"success": True, "message": "已恢复演示数据：12 个资产、5 个机柜"}
+        return {"success": True, "message": "已恢复演示数据：13 个资产、5 个机柜"}
     return {"success": False, "message": "恢复演示数据失败，请检查数据库是否可写"}

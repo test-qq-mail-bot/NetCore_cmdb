@@ -73,7 +73,7 @@ def _insert_asset_full(conn, item: dict) -> int:
             contract_no,supplier,purchase_date,price,warranty_months,warranty_expire,
             note,rack_id,u_start,u_height,is_network_device,config,inventory_time)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (item.get("asset_no") or common._gen_asset_no(item.get("category", "IT设备")),
+        (item.get("asset_no") or common._gen_asset_no(item.get("category", "IT设备"), conn=conn),
          item.get("name"), item.get("category", "IT设备"), item.get("subtype"),
          item.get("user"), item.get("dept"), item.get("location"), item.get("status", "在库"),
          item.get("brand"), item.get("model"), item.get("sn"), item.get("contract_no"),

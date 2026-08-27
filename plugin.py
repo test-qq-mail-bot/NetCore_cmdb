@@ -57,7 +57,7 @@ class CMDBPlugin(BasePlugin):
             "name": "cmdb",
             # IT 资产详情-系统信息取消「密码」模块（移除显示密码按钮与密码列，
             # 密码已加密存储且不再展示，防敏感信息泄漏）
-            "version": "20260826-V4",
+            "version": "20260826-V5",
             "description": "资产配置管理（CMDB）：资产台账、机柜 U 位、维保与报表",
             "author": "NetCore Team",
         }

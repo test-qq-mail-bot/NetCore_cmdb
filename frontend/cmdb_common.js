@@ -127,7 +127,7 @@ template: `
               <el-row :gutter="12">
                 <el-col :span="12">
                   <el-form-item label="资产编号">
-                    <el-input v-model="form.asset_no" :placeholder="isEdit ? '可修改（冲突时禁止保存）' : '留空自动生成'"></el-input>
+                      <el-input v-model="form.asset_no" :placeholder="isEdit ? '可修改，格式：前缀-年月日-2位序号（如 IT-20260826-00）' : '留空自动生成；手填格式 IT-20260826-00'"></el-input>
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
@@ -356,6 +356,16 @@ template: `
             },
             async save() {
                 if (!this.form.name) { this.$message.error('请输入资产名称'); return; }
+                // 资产编号前端预检（后端仍权威校验）：手填时须为 前缀(IT/OF/PE/AS)-8位日期-2位序号
+                const ano = (this.form.asset_no || '').trim();
+                if (ano) {
+                    const m = ano.match(/^(IT|OF|PE|AS)-(\d{8})-(\d{2})$/);
+                    if (!m) { this.$message.error('资产编号格式不正确，应为 前缀-年月日-2位序号（如 IT-20260826-00），或留空由系统生成'); return; }
+                    const d = new Date(m[2].replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'));
+                    if (isNaN(d.getTime()) || m[2] !== d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')) {
+                        this.$message.error('资产编号中的日期 ' + m[2] + ' 不是有效日期'); return;
+                    }
+                }
                 const payload = Object.assign({}, this.form);
                 payload.price = parseFloat(this.form.price) || 0;
                 delete payload.warranty_months; // 保修期(月)已从表单移除，不再提交（保留库内原值）
